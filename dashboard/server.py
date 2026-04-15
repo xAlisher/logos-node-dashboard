@@ -21,6 +21,7 @@ RUNBOOK_ROOT = ROOT.parent
 DEFAULT_NODE_API = "http://127.0.0.1:8080"
 DEFAULT_LOG_DIR = RUNBOOK_ROOT / "state/live-v0.1.2/logs"
 DEFAULT_ZONE_BOARD_DIR = RUNBOOK_ROOT / "state/zone-board-v0.2.2"
+DEFAULT_LIVE_CHANNEL_CACHE_NAME = "dashboard-live-channels.json"
 DEFAULT_ZONE_BOARD_TMUX_SESSION = "zone-board"
 DEFAULT_LOCAL_ZONE_CHANNEL = "local"
 ZONE_TOPIC_PREFIX = b"logos:yolo:"
@@ -177,12 +178,49 @@ def message_key(message: dict) -> tuple[str, str]:
     return (str(message.get("timestamp") or ""), str(message.get("text") or ""))
 
 
+def normalize_live_channels(payload: object) -> dict[str, list[dict]]:
+    if not isinstance(payload, dict):
+        return {}
+
+    channels = payload.get("channels", payload)
+    if not isinstance(channels, dict):
+        return {}
+
+    normalized: dict[str, list[dict]] = {}
+    for channel, messages in channels.items():
+        if not isinstance(channel, str) or not isinstance(messages, list):
+            continue
+
+        clean_messages = [message for message in messages if isinstance(message, dict)]
+        normalized[channel] = clean_messages[-MAX_LIVE_MESSAGES_PER_CHANNEL:]
+    return normalized
+
+
+def load_live_channels(path: Path) -> dict[str, list[dict]]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return normalize_live_channels(payload)
+
+
+def save_live_channels(path: Path, channels: dict[str, list[dict]]) -> None:
+    payload = {
+        "channels": channels,
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_suffix(f"{path.suffix}.tmp")
+    tmp_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    tmp_path.replace(path)
+
+
 class DashboardHandler(BaseHTTPRequestHandler):
     node_api = DEFAULT_NODE_API
     log_dir = DEFAULT_LOG_DIR
     zone_board_dir = DEFAULT_ZONE_BOARD_DIR
     zone_board_tmux_session = DEFAULT_ZONE_BOARD_TMUX_SESSION
     local_zone_channel = DEFAULT_LOCAL_ZONE_CHANNEL
+    live_channel_cache: Path | None = None
     live_channels: dict[str, list[dict]] = {}
     live_channels_lock = Lock()
 
@@ -431,18 +469,26 @@ class DashboardHandler(BaseHTTPRequestHandler):
         with self.live_channels_lock:
             stored = self.live_channels.setdefault(channel, [])
             seen = {message_key(message) for message in stored}
+            changed = False
             for message in parsed["messages"]:
                 key = message_key(message)
                 if key not in seen:
                     stored.append(message)
                     seen.add(key)
+                    changed = True
                 else:
                     for index, existing in enumerate(stored):
                         if message_key(existing) == key:
-                            stored[index] = {**existing, **message}
+                            updated = {**existing, **message}
+                            if updated != existing:
+                                stored[index] = updated
+                                changed = True
                             break
             if len(stored) > MAX_LIVE_MESSAGES_PER_CHANNEL:
                 del stored[:-MAX_LIVE_MESSAGES_PER_CHANNEL]
+                changed = True
+            if changed and self.live_channel_cache is not None:
+                save_live_channels(self.live_channel_cache, self.live_channels)
             live_channels = [
                 {
                     "channel": channel_name,
@@ -582,6 +628,11 @@ def main() -> None:
         default=os.environ.get("ZONE_CHANNEL", DEFAULT_LOCAL_ZONE_CHANNEL),
         help="Fallback local channel name when zone-board has not rendered one yet.",
     )
+    parser.add_argument(
+        "--live-channel-cache",
+        default=os.environ.get("DASHBOARD_LIVE_CHANNEL_CACHE"),
+        help="JSON file used to persist dashboard live channel messages across restarts.",
+    )
     args = parser.parse_args()
 
     DashboardHandler.node_api = args.node_api.rstrip("/")
@@ -589,6 +640,12 @@ def main() -> None:
     DashboardHandler.zone_board_dir = Path(args.zone_board_dir)
     DashboardHandler.zone_board_tmux_session = args.zone_board_tmux_session
     DashboardHandler.local_zone_channel = args.local_zone_channel
+    DashboardHandler.live_channel_cache = (
+        Path(args.live_channel_cache)
+        if args.live_channel_cache
+        else DashboardHandler.zone_board_dir / DEFAULT_LIVE_CHANNEL_CACHE_NAME
+    )
+    DashboardHandler.live_channels = load_live_channels(DashboardHandler.live_channel_cache)
 
     server = ThreadingHTTPServer((args.host, args.port), DashboardHandler)
     print(f"Dashboard listening on http://{args.host}:{args.port}")
@@ -597,6 +654,7 @@ def main() -> None:
     print(f"Zone-board dir: {DashboardHandler.zone_board_dir}")
     print(f"Zone-board tmux session: {DashboardHandler.zone_board_tmux_session}")
     print(f"Local zone channel: {DashboardHandler.local_zone_channel}")
+    print(f"Live channel cache: {DashboardHandler.live_channel_cache}")
     server.serve_forever()
 
 
