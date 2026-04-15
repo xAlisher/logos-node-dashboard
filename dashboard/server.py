@@ -13,6 +13,7 @@ from collections import deque
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from threading import Lock
 
 
 ROOT = Path(__file__).resolve().parent
@@ -25,6 +26,7 @@ DEFAULT_LOCAL_ZONE_CHANNEL = "local"
 ZONE_TOPIC_PREFIX = b"logos:yolo:"
 MAX_PUBLISH_BYTES = 500
 MAX_SUBSCRIBE_CHANNEL_BYTES = 64
+MAX_LIVE_MESSAGES_PER_CHANNEL = 200
 TUI_MESSAGE_RE = re.compile(r"^\s*(\d{2}:\d{2}:\d{2})\s+(.+?)\s*$")
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 SLOT_RE = re.compile(r"slot: Slot\((\d+)\)")
@@ -171,12 +173,18 @@ def parse_zone_board_tui(capture: str) -> dict:
     }
 
 
+def message_key(message: dict) -> tuple[str, str]:
+    return (str(message.get("timestamp") or ""), str(message.get("text") or ""))
+
+
 class DashboardHandler(BaseHTTPRequestHandler):
     node_api = DEFAULT_NODE_API
     log_dir = DEFAULT_LOG_DIR
     zone_board_dir = DEFAULT_ZONE_BOARD_DIR
     zone_board_tmux_session = DEFAULT_ZONE_BOARD_TMUX_SESSION
     local_zone_channel = DEFAULT_LOCAL_ZONE_CHANNEL
+    live_channels: dict[str, list[dict]] = {}
+    live_channels_lock = Lock()
 
     def do_GET(self) -> None:
         if self.path in ("/", "/index.html"):
@@ -419,12 +427,39 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 message["status"] = "confirmed"
                 message["finalized"] = False
 
+        channel = parsed["channel"] or self.local_zone_channel
+        with self.live_channels_lock:
+            stored = self.live_channels.setdefault(channel, [])
+            seen = {message_key(message) for message in stored}
+            for message in parsed["messages"]:
+                key = message_key(message)
+                if key not in seen:
+                    stored.append(message)
+                    seen.add(key)
+                else:
+                    for index, existing in enumerate(stored):
+                        if message_key(existing) == key:
+                            stored[index] = {**existing, **message}
+                            break
+            if len(stored) > MAX_LIVE_MESSAGES_PER_CHANNEL:
+                del stored[:-MAX_LIVE_MESSAGES_PER_CHANNEL]
+            live_channels = [
+                {
+                    "channel": channel_name,
+                    "topic": f"live:{channel_name}",
+                    "ok": True,
+                    "messages": messages,
+                }
+                for channel_name, messages in sorted(self.live_channels.items())
+            ]
+
         self._send_json(
             {
                 "ok": True,
                 "session": session,
-                "channel": parsed["channel"],
+                "channel": channel,
                 "messages": parsed["messages"],
+                "channels": live_channels,
             }
         )
 

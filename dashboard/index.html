@@ -478,29 +478,38 @@
     }
 
     function mergeLiveChannel(channels, live) {
-      if (!live || !live.channel || !(live.messages || []).length) return channels;
+      const liveChannels = live?.channels?.length
+        ? live.channels
+        : (live?.channel ? [{ channel: live.channel, topic: `live:${live.channel}`, messages: live.messages || [] }] : []);
+      if (!liveChannels.length) return channels;
 
       const next = channels.map((channel) => ({
         ...channel,
         messages: [...(channel.messages || [])],
       }));
-      let channel = next.find((item) => item.channel === live.channel);
-      if (!channel) {
-        channel = {
-          channel: live.channel,
-          topic: `live:${live.channel}`,
-          ok: true,
-          messages: [],
-        };
-        next.push(channel);
-      }
 
-      const seen = new Set(channel.messages.map(messageKey));
-      for (const message of live.messages || []) {
-        const key = messageKey(message);
-        if (!seen.has(key)) {
-          channel.messages.push(message);
-          seen.add(key);
+      for (const liveChannel of liveChannels) {
+        if (!(liveChannel.messages || []).length) continue;
+        let channel = next.find((item) => item.channel === liveChannel.channel);
+        if (!channel) {
+          channel = {
+            channel: liveChannel.channel,
+            topic: liveChannel.topic || `live:${liveChannel.channel}`,
+            ok: true,
+            messages: [],
+          };
+          next.push(channel);
+        }
+
+        const seen = new Map(channel.messages.map((message, index) => [messageKey(message), index]));
+        for (const message of liveChannel.messages || []) {
+          const key = messageKey(message);
+          if (seen.has(key)) {
+            channel.messages[seen.get(key)] = { ...channel.messages[seen.get(key)], ...message };
+          } else {
+            seen.set(key, channel.messages.length);
+            channel.messages.push(message);
+          }
         }
       }
 
