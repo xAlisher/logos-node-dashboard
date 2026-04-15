@@ -1,0 +1,27 @@
+# Runtime state and private keys
+state/
+configs/live/
+*.key
+*.pem
+*.seed
+*.mnemonic
+
+# Downloaded release artifacts and unpacked binaries
+artifacts/
+repo/
+
+# Logs and temporary files
+*.log
+177*
+dashboard/dashboard.log
+__pycache__/
+*.py[cod]
+
+# Local environment overrides
+.env
+dashboard/.env
+
+# Editor/OS noise
+.DS_Store
+.idea/
+.vscode/
