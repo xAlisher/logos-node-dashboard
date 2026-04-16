@@ -372,7 +372,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             )
             return
 
-        lines = [line.rstrip("\n") for line in tail_lines(latest, 80)]
+        lines = [ANSI_RE.sub("", line.rstrip("\n")) for line in tail_lines(latest, 80)]
         self._send_json(
             {
                 "ok": True,
