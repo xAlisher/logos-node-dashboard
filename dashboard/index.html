@@ -342,6 +342,10 @@
         <div class="label">LIB Slot</div>
         <div id="libSlot" class="value">-</div>
       </div>
+      <div class="card">
+        <div class="label">Balance</div>
+        <div id="balance" class="value">-</div>
+      </div>
     </div>
 
     <div class="panel">
@@ -397,6 +401,7 @@
       height: document.getElementById("height"),
       slot: document.getElementById("slot"),
       libSlot: document.getElementById("libSlot"),
+      balance: document.getElementById("balance"),
       tip: document.getElementById("tip"),
       lib: document.getElementById("lib"),
       apiUrl: document.getElementById("apiUrl"),
@@ -442,6 +447,13 @@
         els.height.textContent = data.height ?? "-";
         els.slot.textContent = data.slot ?? "-";
         els.libSlot.textContent = data.lib_slot ?? "-";
+        if (data.wallet?.ok) {
+          els.balance.textContent = `${data.wallet.balance ?? "-"} LGO`;
+          els.balance.title = data.wallet.address || "";
+        } else {
+          els.balance.textContent = "-";
+          els.balance.title = data.wallet?.error || "";
+        }
         els.tip.textContent = data.tip ?? "-";
         els.lib.textContent = data.lib ?? "-";
         els.apiUrl.textContent = data.url ?? "-";

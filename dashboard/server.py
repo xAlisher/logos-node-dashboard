@@ -220,6 +220,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
     zone_board_dir = DEFAULT_ZONE_BOARD_DIR
     zone_board_tmux_session = DEFAULT_ZONE_BOARD_TMUX_SESSION
     local_zone_channel = DEFAULT_LOCAL_ZONE_CHANNEL
+    wallet_public_key = ""
     live_channel_cache: Path | None = None
     live_channels: dict[str, list[dict]] = {}
     live_channels_lock = Lock()
@@ -322,7 +323,40 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
         payload["ok"] = True
         payload["url"] = url
+        payload["wallet"] = self._wallet_balance()
         self._send_json(payload)
+
+    def _wallet_balance(self) -> dict:
+        public_key = self.wallet_public_key.strip()
+        if not public_key:
+            return {
+                "ok": False,
+                "error": "Wallet public key not configured",
+            }
+
+        url = f"{self.node_api}/wallet/{public_key}/balance"
+        try:
+            with urllib.request.urlopen(url, timeout=2) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except (urllib.error.URLError, json.JSONDecodeError, TimeoutError) as exc:
+            return {
+                "ok": False,
+                "url": url,
+                "address": public_key,
+                "error": str(exc),
+            }
+
+        if isinstance(payload, dict):
+            payload["ok"] = True
+            payload["url"] = url
+            return payload
+
+        return {
+            "ok": False,
+            "url": url,
+            "address": public_key,
+            "error": "Unexpected wallet balance response",
+        }
 
     def _serve_logs(self) -> None:
         latest = latest_log_file(self.log_dir)
@@ -629,6 +663,11 @@ def main() -> None:
         help="Fallback local channel name when zone-board has not rendered one yet.",
     )
     parser.add_argument(
+        "--wallet-public-key",
+        default=os.environ.get("WALLET_PUBLIC_KEY", ""),
+        help="Wallet public key used for the balance card.",
+    )
+    parser.add_argument(
         "--live-channel-cache",
         default=os.environ.get("DASHBOARD_LIVE_CHANNEL_CACHE"),
         help="JSON file used to persist dashboard live channel messages across restarts.",
@@ -640,6 +679,7 @@ def main() -> None:
     DashboardHandler.zone_board_dir = Path(args.zone_board_dir)
     DashboardHandler.zone_board_tmux_session = args.zone_board_tmux_session
     DashboardHandler.local_zone_channel = args.local_zone_channel
+    DashboardHandler.wallet_public_key = args.wallet_public_key
     DashboardHandler.live_channel_cache = (
         Path(args.live_channel_cache)
         if args.live_channel_cache
@@ -654,6 +694,7 @@ def main() -> None:
     print(f"Zone-board dir: {DashboardHandler.zone_board_dir}")
     print(f"Zone-board tmux session: {DashboardHandler.zone_board_tmux_session}")
     print(f"Local zone channel: {DashboardHandler.local_zone_channel}")
+    print(f"Wallet public key: {DashboardHandler.wallet_public_key or '(not configured)'}")
     print(f"Live channel cache: {DashboardHandler.live_channel_cache}")
     server.serve_forever()
 
