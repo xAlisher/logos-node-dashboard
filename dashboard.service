@@ -1,0 +1,15 @@
+[Unit]
+Description=Logos Node Dashboard (runbook)
+After=network-online.target logos-node.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/alisher/logos-blockchain-runbook
+Environment=ZONE_CHANNEL=alisher
+ExecStart=/home/alisher/logos-blockchain-runbook/dashboard/run.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

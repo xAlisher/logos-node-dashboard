@@ -87,6 +87,8 @@ tmux new -ds zone-board \
 
 Use the same value for `--channel` and `ZONE_CHANNEL`.
 
+This runbook also includes a user `systemd` unit, `zone-board.service`, which starts and supervises that tmux session through `run-zone-board.sh`.
+
 ## Safety
 
 Do not publish state directories or keys.

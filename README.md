@@ -19,6 +19,23 @@ Open:
 http://127.0.0.1:8090/
 ```
 
+## User Services
+
+User `systemd` service files are included for both processes:
+
+- `logos-node.service`
+- `dashboard.service`
+- `zone-board.service`
+
+Install them under `~/.config/systemd/user/`, then run:
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now logos-node.service dashboard.service zone-board.service
+```
+
+Both services are configured with automatic restart on failure.
+
 ## Publish Safety
 
 This repository should contain scripts, configs, and docs only. Do not commit local runtime state, keys, databases, logs, or downloaded release artifacts.

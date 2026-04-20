@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 import json
 import mimetypes
 import os
 import re
 import subprocess
+import time
 import urllib.error
 import urllib.request
 from collections import deque
@@ -28,6 +30,7 @@ ZONE_TOPIC_PREFIX = b"logos:yolo:"
 MAX_PUBLISH_BYTES = 500
 MAX_SUBSCRIBE_CHANNEL_BYTES = 64
 MAX_LIVE_MESSAGES_PER_CHANNEL = 200
+LOG_METADATA_REFRESH_SECS = 30
 TUI_MESSAGE_RE = re.compile(r"^\s*(\d{2}:\d{2}:\d{2})\s+(.+?)\s*$")
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 SLOT_RE = re.compile(r"slot: Slot\((\d+)\)")
@@ -36,6 +39,7 @@ CHANNEL_INSCRIBE_RE = re.compile(
     r"inscription: \[([^\]]*)\].*?signer: PublicKey\(([0-9a-f]+)\).*?"
     r"Received proposal with ID: HeaderId\(([0-9a-f]+)\)"
 )
+LOG_TIMESTAMP_RE = re.compile(r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)")
 
 
 def latest_log_file(log_dir: Path) -> Path | None:
@@ -60,8 +64,20 @@ def decode_zone_channel(topic_hex: str) -> str:
 
     if raw.startswith(ZONE_TOPIC_PREFIX):
         raw = raw[len(ZONE_TOPIC_PREFIX) :]
+    elif any(value < 32 or value > 126 for value in raw):
+        return short_hex(topic_hex)
 
-    return raw.decode("utf-8", errors="replace") or topic_hex
+    try:
+        decoded = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return short_hex(topic_hex)
+    if "\ufffd" in decoded or any(ord(char) < 32 for char in decoded):
+        return short_hex(topic_hex)
+    return decoded or short_hex(topic_hex)
+
+
+def short_hex(value: str, length: int = 13) -> str:
+    return f"{value[:length]}..." if len(value) > length else value
 
 
 def short_channel_label(topic_hex: str) -> str:
@@ -69,7 +85,7 @@ def short_channel_label(topic_hex: str) -> str:
     if decoded != topic_hex and "\ufffd" not in decoded and all(ord(char) >= 32 for char in decoded):
         return decoded
     if len(topic_hex) == 64:
-        return f"{topic_hex[:13]}..."
+        return short_hex(topic_hex)
     return topic_hex
 
 
@@ -87,6 +103,18 @@ def parse_decimal_bytes(raw: str) -> bytes | None:
     return bytes(values)
 
 
+def parse_log_timestamp(line: str) -> str | None:
+    match = LOG_TIMESTAMP_RE.search(ANSI_RE.sub("", line))
+    return match.group(1) if match else None
+
+
+def timestamp_time(timestamp: str | None) -> str:
+    if not timestamp:
+        return ""
+    match = re.search(r"T(\d{2}:\d{2}:\d{2})", timestamp)
+    return match.group(1) if match else ""
+
+
 def current_lib_slot(node_api: str) -> int | None:
     try:
         with urllib.request.urlopen(f"{node_api}/cryptarchia/info", timeout=2) as response:
@@ -100,40 +128,42 @@ def current_lib_slot(node_api: str) -> int | None:
         return None
 
 
-def find_channel_inscriptions(log_dir: Path, channel: str) -> dict[str, dict]:
-    if not log_dir.exists():
-        return {}
+def parse_log_metadata(log_file: Path) -> tuple[dict[str, dict], dict[str, dict[str, list[dict]]]]:
+    block_metadata: dict[str, dict] = {}
+    channel_metadata: dict[str, dict[str, list[dict]]] = {}
+    try:
+        lines = log_file.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return block_metadata, channel_metadata
 
-    topic = channel_topic_bytes(channel)
-    found: dict[str, dict] = {}
-    for log_file in sorted((path for path in log_dir.iterdir() if path.is_file()), key=lambda path: path.name):
-        try:
-            lines = log_file.read_text(encoding="utf-8", errors="replace").splitlines()
-        except OSError:
+    for line in lines:
+        if "ChannelInscribe" not in line or "Received proposal with ID" not in line:
+            continue
+        clean = ANSI_RE.sub("", line)
+        match = CHANNEL_INSCRIBE_RE.search(clean)
+        slot_match = SLOT_RE.search(clean)
+        if not match or slot_match is None:
             continue
 
-        for line in lines:
-            if "ChannelInscribe" not in line or "Received proposal with ID" not in line:
-                continue
-            clean = ANSI_RE.sub("", line)
-            match = CHANNEL_INSCRIBE_RE.search(clean)
-            if not match:
-                continue
-            channel_bytes = parse_decimal_bytes(match.group(1))
-            inscription = parse_decimal_bytes(match.group(2))
-            slot_match = SLOT_RE.search(clean)
-            if channel_bytes != topic or inscription is None or slot_match is None:
-                continue
-            text = inscription.decode("utf-8", errors="replace")
-            found[text] = {
-                "text": text,
-                "slot": int(slot_match.group(1)),
-                "signer": match.group(3),
-                "block_id": match.group(4),
-                "source": "node-log",
-            }
+        channel_bytes = parse_decimal_bytes(match.group(1))
+        inscription = parse_decimal_bytes(match.group(2))
+        if channel_bytes is None or inscription is None:
+            continue
 
-    return found
+        block_id = match.group(4)
+        metadata = {
+            "text": inscription.decode("utf-8", errors="replace"),
+            "timestamp_iso": parse_log_timestamp(line),
+            "slot": int(slot_match.group(1)),
+            "signer": match.group(3),
+            "block_id": block_id,
+            "source": "node-log",
+        }
+        block_metadata[block_id] = metadata
+        channel = decode_zone_channel(channel_bytes.hex())
+        channel_metadata.setdefault(channel, {}).setdefault(metadata["text"], []).append(metadata)
+
+    return block_metadata, channel_metadata
 
 
 def parse_zone_board_tui(capture: str) -> dict:
@@ -178,6 +208,17 @@ def message_key(message: dict) -> tuple[str, str]:
     return (str(message.get("timestamp") or ""), str(message.get("text") or ""))
 
 
+def observed_now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def file_timestamp(path: Path) -> str | None:
+    try:
+        return datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat(timespec="seconds")
+    except OSError:
+        return None
+
+
 def normalize_live_channels(payload: object) -> dict[str, list[dict]]:
     if not isinstance(payload, dict):
         return {}
@@ -191,7 +232,14 @@ def normalize_live_channels(payload: object) -> dict[str, list[dict]]:
         if not isinstance(channel, str) or not isinstance(messages, list):
             continue
 
-        clean_messages = [message for message in messages if isinstance(message, dict)]
+        clean_messages = []
+        for message in messages:
+            if not isinstance(message, dict):
+                continue
+            clean = dict(message)
+            if not isinstance(clean.get("observed_at"), str) or not clean["observed_at"]:
+                clean["observed_at"] = observed_now()
+            clean_messages.append(clean)
         normalized[channel] = clean_messages[-MAX_LIVE_MESSAGES_PER_CHANNEL:]
     return normalized
 
@@ -224,6 +272,11 @@ class DashboardHandler(BaseHTTPRequestHandler):
     live_channel_cache: Path | None = None
     live_channels: dict[str, list[dict]] = {}
     live_channels_lock = Lock()
+    log_metadata_lock = Lock()
+    log_metadata_last_refresh = 0.0
+    log_file_cache: dict[str, dict] = {}
+    block_metadata_cache: dict[str, dict] = {}
+    channel_metadata_cache: dict[str, dict[str, list[dict]]] = {}
 
     def do_GET(self) -> None:
         if self.path in ("/", "/index.html"):
@@ -262,6 +315,12 @@ class DashboardHandler(BaseHTTPRequestHandler):
     def log_message(self, fmt: str, *args) -> None:
         return
 
+    def handle(self) -> None:
+        try:
+            super().handle()
+        except (BrokenPipeError, ConnectionResetError):
+            return
+
     def _serve_file(self, path: Path) -> None:
         if not path.exists():
             self.send_error(HTTPStatus.NOT_FOUND, "File not found")
@@ -277,12 +336,106 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
     def _send_json(self, payload: dict, status: int = HTTPStatus.OK) -> None:
         body = json.dumps(payload).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            return
+
+    @classmethod
+    def _refresh_log_metadata(cls) -> None:
+        now = time.monotonic()
+        if now - cls.log_metadata_last_refresh < LOG_METADATA_REFRESH_SECS:
+            return
+
+        with cls.log_metadata_lock:
+            now = time.monotonic()
+            if now - cls.log_metadata_last_refresh < LOG_METADATA_REFRESH_SECS:
+                return
+
+            if not cls.log_dir.exists():
+                cls.log_file_cache = {}
+                cls.block_metadata_cache = {}
+                cls.channel_metadata_cache = {}
+                cls.log_metadata_last_refresh = now
+                return
+
+            next_file_cache: dict[str, dict] = {}
+            next_block_metadata: dict[str, dict] = {}
+            next_channel_metadata: dict[str, dict[str, list[dict]]] = {}
+            for log_file in sorted((path for path in cls.log_dir.iterdir() if path.is_file()), key=lambda path: path.name):
+                try:
+                    stat = log_file.stat()
+                except OSError:
+                    continue
+
+                key = str(log_file)
+                signature = (stat.st_size, stat.st_mtime_ns)
+                cached = cls.log_file_cache.get(key)
+                if cached and cached.get("signature") == signature:
+                    file_block_metadata = cached["block_metadata"]
+                    file_channel_metadata = cached["channel_metadata"]
+                else:
+                    file_block_metadata, file_channel_metadata = parse_log_metadata(log_file)
+
+                next_file_cache[key] = {
+                    "signature": signature,
+                    "block_metadata": file_block_metadata,
+                    "channel_metadata": file_channel_metadata,
+                }
+                next_block_metadata.update(file_block_metadata)
+                for channel, messages in file_channel_metadata.items():
+                    channel_messages = next_channel_metadata.setdefault(channel, {})
+                    for text, text_messages in messages.items():
+                        channel_messages.setdefault(text, []).extend(text_messages)
+
+            cls.log_file_cache = next_file_cache
+            cls.block_metadata_cache = next_block_metadata
+            cls.channel_metadata_cache = next_channel_metadata
+            cls.log_metadata_last_refresh = now
+
+    @classmethod
+    def _block_metadata(cls) -> dict[str, dict]:
+        cls._refresh_log_metadata()
+        return cls.block_metadata_cache
+
+    @classmethod
+    def _channel_inscriptions(cls, channel: str) -> dict[str, dict]:
+        cls._refresh_log_metadata()
+        return {
+            text: messages[-1]
+            for text, messages in cls.channel_metadata_cache.get(channel, {}).items()
+            if messages
+        }
+
+    @classmethod
+    def _match_channel_metadata(cls, channel: str, message: dict) -> dict | None:
+        cls._refresh_log_metadata()
+        text = str(message.get("text") or "")
+        candidates = cls.channel_metadata_cache.get(channel, {}).get(text, [])
+        if not candidates:
+            return None
+
+        message_time = str(message.get("timestamp") or "")
+        if message_time:
+            for candidate in candidates:
+                if timestamp_time(candidate.get("timestamp_iso")) == message_time:
+                    return candidate
+        return candidates[-1]
+
+
+    @staticmethod
+    def _with_fallback_timestamp(message: dict, fallback_iso: str | None) -> dict:
+        if message.get("timestamp_iso") or not fallback_iso:
+            return message
+        timestamp = str(message.get("timestamp") or "")
+        if re.fullmatch(r"\d{2}:\d{2}:\d{2}", timestamp):
+            return {**message, "timestamp_iso": f"{fallback_iso[:10]}T{timestamp}Z"}
+        return {**message, "timestamp_iso": fallback_iso}
 
     def _read_json_body(self) -> dict:
         try:
@@ -396,10 +549,13 @@ class DashboardHandler(BaseHTTPRequestHandler):
             )
             return
 
+        block_metadata = self._block_metadata()
         channels = []
         seen_topics = set()
         for cache_file in sorted(cache_dir.glob("*.json")):
             topic_hex = cache_file.stem
+            channel_name = decode_zone_channel(topic_hex)
+            fallback_iso = file_timestamp(cache_file)
             seen_topics.add(topic_hex)
             try:
                 messages = json.loads(cache_file.read_text(encoding="utf-8"))
@@ -415,12 +571,28 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 )
                 continue
 
+            enriched_messages = []
+            if isinstance(messages, list):
+                for message in messages:
+                    if not isinstance(message, dict):
+                        continue
+                    enriched = dict(message)
+                    block_id = enriched.get("block_id")
+                    if isinstance(block_id, str) and block_id in block_metadata:
+                        enriched = {**enriched, **block_metadata[block_id]}
+                        enriched["timestamp"] = message.get("timestamp", enriched.get("timestamp", ""))
+                    elif metadata := self._match_channel_metadata(channel_name, enriched):
+                        enriched = {**enriched, **metadata}
+                        enriched["timestamp"] = message.get("timestamp", enriched.get("timestamp", ""))
+                    enriched = self._with_fallback_timestamp(enriched, fallback_iso)
+                    enriched_messages.append(enriched)
+
             channels.append(
                 {
-                    "channel": decode_zone_channel(topic_hex),
+                    "channel": channel_name,
                     "topic": topic_hex,
                     "ok": True,
-                    "messages": messages if isinstance(messages, list) else [],
+                    "messages": enriched_messages,
                 }
             )
 
@@ -485,7 +657,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             return
 
         parsed = parse_zone_board_tui(capture)
-        inscriptions = find_channel_inscriptions(self.log_dir, parsed["channel"] or self.local_zone_channel)
+        inscriptions = self._channel_inscriptions(parsed["channel"] or self.local_zone_channel)
         lib_slot = current_lib_slot(self.node_api)
         for message in parsed["messages"]:
             inscription = inscriptions.get(message["text"])
@@ -505,8 +677,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
             seen = {message_key(message) for message in stored}
             changed = False
             for message in parsed["messages"]:
+                message = dict(message)
                 key = message_key(message)
                 if key not in seen:
+                    message["observed_at"] = observed_now()
                     stored.append(message)
                     seen.add(key)
                     changed = True
@@ -514,10 +688,13 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     for index, existing in enumerate(stored):
                         if message_key(existing) == key:
                             updated = {**existing, **message}
+                            updated["observed_at"] = existing.get("observed_at") or observed_now()
                             if updated != existing:
                                 stored[index] = updated
                                 changed = True
+                            message = updated
                             break
+                message["observed_at"] = message.get("observed_at") or observed_now()
             if len(stored) > MAX_LIVE_MESSAGES_PER_CHANNEL:
                 del stored[:-MAX_LIVE_MESSAGES_PER_CHANNEL]
                 changed = True

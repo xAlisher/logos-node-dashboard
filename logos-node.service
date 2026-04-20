@@ -1,0 +1,14 @@
+[Unit]
+Description=Logos Blockchain Node (runbook)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/alisher/logos-blockchain-runbook
+ExecStart=/home/alisher/logos-blockchain-runbook/run-node.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

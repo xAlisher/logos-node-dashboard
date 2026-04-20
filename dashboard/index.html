@@ -128,7 +128,7 @@
       display: flex;
       flex-direction: column;
       gap: 10px;
-      height: 260px;
+      height: 420px;
       overflow-y: scroll;
       padding: 12px;
       background: #020617;
@@ -426,6 +426,8 @@
 
     let selectedZoneChannel = "all";
     let latestZoneChannels = [];
+    const ZONE_REFRESH_MS = 5000;
+    const PANEL_REFRESH_MS = 5000;
 
     function setMode(mode) {
       els.mode.textContent = mode || "-";
@@ -485,47 +487,71 @@
       return (channel.messages || []).length;
     }
 
-    function messageKey(message) {
-      return `${message.timestamp || ""}\u0000${message.text || ""}`;
+    function messageText(message) {
+      return String(message.text || "");
     }
 
-    function mergeLiveChannel(channels, live) {
-      const liveChannels = live?.channels?.length
+    function messageKey(message) {
+      if (message.block_id) return `block:${message.block_id}`;
+      if (message.slot != null && message.text) return `slot:${message.slot}\u0000${messageText(message)}`;
+      return `${messageText(message)}\u0000${message.timestamp_iso || ""}\u0000${message.timestamp || ""}\u0000${message.observed_at || ""}`;
+    }
+
+    function canonicalMessageText(message) {
+      return messageText(message)
+        .replace(/\s+\(pending…\)$/u, "")
+        .replace(/\s+\(pending\.\.\.\)$/u, "")
+        .trim();
+    }
+
+    function getLiveChannels(live) {
+      return live?.channels?.length
         ? live.channels
         : (live?.channel ? [{ channel: live.channel, topic: `live:${live.channel}`, messages: live.messages || [] }] : []);
-      if (!liveChannels.length) return channels;
+    }
 
-      const next = channels.map((channel) => ({
-        ...channel,
-        messages: [...(channel.messages || [])],
-      }));
-
-      for (const liveChannel of liveChannels) {
-        if (!(liveChannel.messages || []).length) continue;
-        let channel = next.find((item) => item.channel === liveChannel.channel);
-        if (!channel) {
-          channel = {
-            channel: liveChannel.channel,
-            topic: liveChannel.topic || `live:${liveChannel.channel}`,
-            ok: true,
-            messages: [],
-          };
-          next.push(channel);
-        }
-
-        const seen = new Map(channel.messages.map((message, index) => [messageKey(message), index]));
-        for (const message of liveChannel.messages || []) {
-          const key = messageKey(message);
-          if (seen.has(key)) {
-            channel.messages[seen.get(key)] = { ...channel.messages[seen.get(key)], ...message };
-          } else {
-            seen.set(key, channel.messages.length);
-            channel.messages.push(message);
-          }
-        }
+    function mergeMessage(messages, incoming) {
+      const key = messageKey(incoming);
+      const keyIndex = messages.findIndex((message) => messageKey(message) === key);
+      if (keyIndex >= 0) {
+        messages[keyIndex] = { ...messages[keyIndex], ...incoming };
+        return;
       }
 
-      return next;
+      const incomingText = canonicalMessageText(incoming);
+      const prefixIndex = messages.findIndex((message) => {
+        const existingText = canonicalMessageText(message);
+        return message.block_id && incomingText && existingText && existingText.startsWith(incomingText);
+      });
+      if (prefixIndex >= 0) {
+        messages[prefixIndex] = { ...incoming, ...messages[prefixIndex] };
+        return;
+      }
+
+      messages.push(incoming);
+    }
+
+    function mergeChannels(cachedChannels, live) {
+      const channels = new Map();
+      for (const channel of [...(cachedChannels || []), ...getLiveChannels(live)]) {
+        const name = channel.channel || "unknown";
+        const existing = channels.get(name) || {
+          channel: name,
+          topic: channel.topic || name,
+          ok: true,
+          messages: [],
+        };
+        existing.topic = existing.topic || channel.topic || name;
+        existing.ok = existing.ok && channel.ok !== false;
+        for (const message of channel.messages || []) {
+          mergeMessage(existing.messages, message);
+        }
+        channels.set(name, existing);
+      }
+      return [...channels.values()].map((channel) => ({
+        ...channel,
+        messages: sortMessages(channel.messages),
+      }));
     }
 
     function renderZoneTabs(channels) {
@@ -577,27 +603,58 @@
       return element.scrollHeight - element.scrollTop - element.clientHeight < 48;
     }
 
-    function messageSortValue(message) {
-      const [hours, minutes, seconds] = String(message.timestamp || "00:00:00").split(":").map(Number);
-      return ((hours || 0) * 3600) + ((minutes || 0) * 60) + (seconds || 0);
+    function parseTimestampValue(value) {
+      const time = Date.parse(value || "");
+      return Number.isFinite(time) ? time : 0;
+    }
+
+    function messageDateValue(message) {
+      return parseTimestampValue(message.timestamp_iso) || parseTimestampValue(message.observed_at);
+    }
+
+    function formatMessageTimestamp(message) {
+      const value = message.timestamp_iso || message.observed_at || "";
+      const parsed = Date.parse(value);
+      if (Number.isFinite(parsed)) {
+        return new Date(parsed).toLocaleString([], {
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+        });
+      }
+      return message.timestamp || "-";
+    }
+
+    function sortMessages(messages) {
+      return [...messages].sort((a, b) => {
+        const byDate = messageDateValue(a) - messageDateValue(b);
+        if (byDate) return byDate;
+
+        const aSlot = Number(a.slot);
+        const bSlot = Number(b.slot);
+        if (Number.isFinite(aSlot) && Number.isFinite(bSlot) && aSlot !== bSlot) {
+          return aSlot - bSlot;
+        }
+
+        return messageText(a).localeCompare(messageText(b));
+      });
     }
 
     function renderZoneMessages(channels) {
       const shouldStickToBottom = isScrolledNearBottom(els.zoneMessages);
       const parts = [];
       for (const channel of visibleZoneChannels(channels || [])) {
-        const messages = channel.messages || [];
-        for (const message of messages) {
+        for (const message of channel.messages || []) {
           parts.push({ channel: channel.channel, order: parts.length, ...message });
         }
       }
 
-      parts.sort((a, b) => {
-        const byTime = messageSortValue(a) - messageSortValue(b);
-        return byTime || a.order - b.order;
-      });
+      const sortedParts = sortMessages(parts);
 
-      if (!parts.length) {
+      if (!sortedParts.length) {
         els.zoneMessages.textContent = "No synced messages yet.";
         requestAnimationFrame(() => {
           els.zoneMessages.scrollTop = els.zoneMessages.scrollHeight;
@@ -606,7 +663,7 @@
       }
 
       els.zoneMessages.replaceChildren(
-        ...parts.map((message) => {
+        ...sortedParts.map((message) => {
           const item = document.createElement("div");
           item.className = "message";
 
@@ -618,7 +675,7 @@
           channel.textContent = message.channel || "unknown";
 
           const time = document.createElement("span");
-          time.textContent = message.timestamp || "-";
+          time.textContent = formatMessageTimestamp(message);
 
           const status = document.createElement("span");
           status.textContent = message.status || (message.source === "live-tui"
@@ -633,7 +690,9 @@
 
           const text = document.createElement("div");
           text.className = "message-text";
-          text.textContent = message.text || "";
+          const fullText = messageText(message);
+          text.textContent = fullText.length > 280 ? `${fullText.slice(0, 280)}...` : fullText;
+          text.title = fullText;
 
           item.append(head, text);
           return item;
@@ -662,7 +721,7 @@
           const liveData = await liveRes.json();
           if (liveData.ok) live = liveData;
         }
-        latestZoneChannels = mergeLiveChannel(data.channels || [], live);
+        latestZoneChannels = mergeChannels(data.channels || [], live);
         const count = latestZoneChannels.reduce((sum, channel) => sum + (channel.messages || []).length, 0);
         const names = latestZoneChannels.map((channel) => channel.channel).join(", ") || "none";
         const liveNote = live?.channel ? `; live TUI: ${live.channel}` : "";
@@ -761,12 +820,14 @@
       }
     });
 
-    async function refresh() {
-      await Promise.all([loadStatus(), loadLogs(), loadZoneMessages()]);
+    async function refreshPanels() {
+      await Promise.all([loadStatus(), loadLogs()]);
     }
 
-    refresh();
-    setInterval(refresh, 5000);
+    refreshPanels();
+    loadZoneMessages();
+    setInterval(refreshPanels, PANEL_REFRESH_MS);
+    setInterval(loadZoneMessages, ZONE_REFRESH_MS);
   </script>
 </body>
 </html>

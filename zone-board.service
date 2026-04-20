@@ -1,0 +1,18 @@
+[Unit]
+Description=Zone Board (runbook)
+After=network-online.target logos-node.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/alisher/logos-blockchain-runbook
+Environment=ZONE_CHANNEL=alisher
+Environment=ZONE_BOARD_TMUX_SESSION=zone-board
+Environment=ZONE_BOARD_DIR=/home/alisher/logos-blockchain-runbook/state/zone-board-v0.2.2
+Environment=NODE_API=http://127.0.0.1:8080
+ExecStart=/home/alisher/logos-blockchain-runbook/run-zone-board.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
