@@ -1,7 +1,8 @@
 # Logos Blockchain Runbook
 
 Local runbook and dashboard helpers for running a Logos Blockchain testnet node.
-<img width="1418" height="1200" alt="image" src="https://github.com/user-attachments/assets/93103a20-cf5f-4fdb-a372-264ab4f5888c" />
+<img width="1593" height="1308" alt="image" src="https://github.com/user-attachments/assets/ebe1790d-ff05-41b8-8bd4-8df83d759911" />
+
 
 ## Dashboard
 
