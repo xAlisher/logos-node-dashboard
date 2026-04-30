@@ -31,6 +31,11 @@ MAX_PUBLISH_BYTES = 500
 MAX_SUBSCRIBE_CHANNEL_BYTES = 64
 MAX_LIVE_MESSAGES_PER_CHANNEL = 200
 LOG_METADATA_REFRESH_SECS = 30
+PROPOSAL_REFRESH_SECS = 60
+MAX_LOG_METADATA_FILES = 3
+MAX_CHANNEL_METADATA_MATCHES = 4
+MAX_RECENT_PROPOSALS = 20
+MAX_PROPOSAL_LOG_FILES = 4
 TUI_MESSAGE_RE = re.compile(r"^\s*(\d{2}:\d{2}:\d{2})\s+(.+?)\s*$")
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 SLOT_RE = re.compile(r"slot: Slot\((\d+)\)")
@@ -40,6 +45,13 @@ CHANNEL_INSCRIBE_RE = re.compile(
     r"Received proposal with ID: HeaderId\(([0-9a-f]+)\)"
 )
 LOG_TIMESTAMP_RE = re.compile(r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)")
+PROPOSAL_RE = re.compile(
+    r"propose_block\{parent=HeaderId\(([0-9a-f]+)\)\s+slot=Slot\((\d+)\)\}.*?"
+    r"proposed block with id HeaderId\(([0-9a-f]+)\) containing (\d+) transactions \((\d+) removed\)"
+)
+PROPOSAL_APPLIED_RE = re.compile(
+    r"Successfully applied our own proposed block\. Publishing it to the blend network: HeaderId\(([0-9a-f]+)\)"
+)
 
 
 def latest_log_file(log_dir: Path) -> Path | None:
@@ -54,6 +66,13 @@ def latest_log_file(log_dir: Path) -> Path | None:
 def tail_lines(path: Path, line_count: int) -> list[str]:
     with path.open("r", encoding="utf-8", errors="replace") as handle:
         return list(deque(handle, maxlen=line_count))
+
+
+def recent_log_files(log_dir: Path, limit: int) -> list[Path]:
+    if not log_dir.exists():
+        return []
+    files = [path for path in log_dir.iterdir() if path.is_file()]
+    return sorted(files, key=lambda path: path.name)[-limit:]
 
 
 def decode_zone_channel(topic_hex: str) -> str:
@@ -132,38 +151,129 @@ def parse_log_metadata(log_file: Path) -> tuple[dict[str, dict], dict[str, dict[
     block_metadata: dict[str, dict] = {}
     channel_metadata: dict[str, dict[str, list[dict]]] = {}
     try:
-        lines = log_file.read_text(encoding="utf-8", errors="replace").splitlines()
+        handle = log_file.open("r", encoding="utf-8", errors="replace")
     except OSError:
         return block_metadata, channel_metadata
 
-    for line in lines:
-        if "ChannelInscribe" not in line or "Received proposal with ID" not in line:
-            continue
-        clean = ANSI_RE.sub("", line)
-        match = CHANNEL_INSCRIBE_RE.search(clean)
-        slot_match = SLOT_RE.search(clean)
-        if not match or slot_match is None:
-            continue
+    with handle:
+        for line in handle:
+            if "ChannelInscribe" not in line or "Received proposal with ID" not in line:
+                continue
+            clean = ANSI_RE.sub("", line)
+            match = CHANNEL_INSCRIBE_RE.search(clean)
+            slot_match = SLOT_RE.search(clean)
+            if not match or slot_match is None:
+                continue
 
-        channel_bytes = parse_decimal_bytes(match.group(1))
-        inscription = parse_decimal_bytes(match.group(2))
-        if channel_bytes is None or inscription is None:
-            continue
+            channel_bytes = parse_decimal_bytes(match.group(1))
+            inscription = parse_decimal_bytes(match.group(2))
+            if channel_bytes is None or inscription is None:
+                continue
 
-        block_id = match.group(4)
-        metadata = {
-            "text": inscription.decode("utf-8", errors="replace"),
-            "timestamp_iso": parse_log_timestamp(line),
-            "slot": int(slot_match.group(1)),
-            "signer": match.group(3),
-            "block_id": block_id,
-            "source": "node-log",
-        }
-        block_metadata[block_id] = metadata
-        channel = decode_zone_channel(channel_bytes.hex())
-        channel_metadata.setdefault(channel, {}).setdefault(metadata["text"], []).append(metadata)
+            block_id = match.group(4)
+            metadata = {
+                "text": inscription.decode("utf-8", errors="replace"),
+                "timestamp_iso": parse_log_timestamp(line),
+                "slot": int(slot_match.group(1)),
+                "signer": match.group(3),
+                "block_id": block_id,
+                "source": "node-log",
+            }
+            block_metadata[block_id] = metadata
+            channel = decode_zone_channel(channel_bytes.hex())
+            matches = channel_metadata.setdefault(channel, {}).setdefault(metadata["text"], [])
+            matches.append(metadata)
+            if len(matches) > MAX_CHANNEL_METADATA_MATCHES:
+                del matches[:-MAX_CHANNEL_METADATA_MATCHES]
 
     return block_metadata, channel_metadata
+
+
+def parse_recent_proposals(log_files: list[Path]) -> list[dict]:
+    proposals: dict[str, dict] = {}
+
+    for log_file in log_files:
+        try:
+            handle = log_file.open("r", encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+
+        with handle:
+            for raw_line in handle:
+                if "proposed block with id" not in raw_line and "Successfully applied our own proposed block" not in raw_line:
+                    continue
+
+                line = ANSI_RE.sub("", raw_line)
+                if proposal_match := PROPOSAL_RE.search(line):
+                    parent_block_id, slot, block_id, tx_count, removed_count = proposal_match.groups()
+                    proposal = proposals.setdefault(
+                        block_id,
+                        {
+                            "timestamp": parse_log_timestamp(line),
+                            "slot": int(slot),
+                            "parent_block_id": parent_block_id,
+                            "block_id": block_id,
+                            "tx_count": int(tx_count),
+                            "removed_count": int(removed_count),
+                            "applied_locally": False,
+                            "published_to_network": False,
+                            "status": "proposed",
+                        },
+                    )
+                    proposal.update(
+                        {
+                            "timestamp": proposal.get("timestamp") or parse_log_timestamp(line),
+                            "slot": int(slot),
+                            "parent_block_id": parent_block_id,
+                            "tx_count": int(tx_count),
+                            "removed_count": int(removed_count),
+                        }
+                    )
+                    continue
+
+                if applied_match := PROPOSAL_APPLIED_RE.search(line):
+                    block_id = applied_match.group(1)
+                    proposal = proposals.setdefault(
+                        block_id,
+                        {
+                            "timestamp": parse_log_timestamp(line),
+                            "slot": None,
+                            "parent_block_id": "",
+                            "block_id": block_id,
+                            "tx_count": 0,
+                            "removed_count": 0,
+                            "applied_locally": False,
+                            "published_to_network": False,
+                            "status": "proposed",
+                        },
+                    )
+                    proposal["applied_locally"] = True
+                    proposal["published_to_network"] = True
+
+    sorted_proposals = sorted(
+        proposals.values(),
+        key=lambda proposal: parse_datetime(proposal.get("timestamp")) or datetime.min.replace(tzinfo=timezone.utc),
+    )
+    for proposal in sorted_proposals:
+        if proposal["applied_locally"] and proposal["published_to_network"]:
+            proposal["status"] = "applied+broadcast"
+        elif proposal["applied_locally"]:
+            proposal["status"] = "applied"
+        elif proposal["published_to_network"]:
+            proposal["status"] = "broadcast"
+        else:
+            proposal["status"] = "proposed"
+    return sorted_proposals
+
+
+def parse_datetime(value: str | None) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    normalized = value.replace("Z", "+00:00")
+    try:
+        return datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
 
 
 def parse_zone_board_tui(capture: str) -> dict:
@@ -277,6 +387,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
     log_file_cache: dict[str, dict] = {}
     block_metadata_cache: dict[str, dict] = {}
     channel_metadata_cache: dict[str, dict[str, list[dict]]] = {}
+    proposal_cache_lock = Lock()
+    proposal_cache_last_refresh = 0.0
+    proposal_cache: dict = {"summary": {}, "recent": []}
 
     def do_GET(self) -> None:
         if self.path in ("/", "/index.html"):
@@ -289,6 +402,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
         if self.path == "/api/logs":
             self._serve_logs()
+            return
+
+        if self.path == "/api/proposals":
+            self._serve_proposals()
             return
 
         if self.path == "/api/zone-messages":
@@ -367,7 +484,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             next_file_cache: dict[str, dict] = {}
             next_block_metadata: dict[str, dict] = {}
             next_channel_metadata: dict[str, dict[str, list[dict]]] = {}
-            for log_file in sorted((path for path in cls.log_dir.iterdir() if path.is_file()), key=lambda path: path.name):
+            for log_file in recent_log_files(cls.log_dir, MAX_LOG_METADATA_FILES):
                 try:
                     stat = log_file.stat()
                 except OSError:
@@ -391,7 +508,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 for channel, messages in file_channel_metadata.items():
                     channel_messages = next_channel_metadata.setdefault(channel, {})
                     for text, text_messages in messages.items():
-                        channel_messages.setdefault(text, []).extend(text_messages)
+                        stored = channel_messages.setdefault(text, [])
+                        stored.extend(text_messages)
+                        if len(stored) > MAX_CHANNEL_METADATA_MATCHES:
+                            del stored[:-MAX_CHANNEL_METADATA_MATCHES]
 
             cls.log_file_cache = next_file_cache
             cls.block_metadata_cache = next_block_metadata
@@ -532,6 +652,40 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 "log_dir": str(self.log_dir),
                 "latest_file": latest.name,
                 "lines": lines,
+            }
+        )
+
+    def _serve_proposals(self) -> None:
+        cls = type(self)
+        now = time.monotonic()
+        if now - cls.proposal_cache_last_refresh >= PROPOSAL_REFRESH_SECS:
+            with cls.proposal_cache_lock:
+                now = time.monotonic()
+                if now - cls.proposal_cache_last_refresh >= PROPOSAL_REFRESH_SECS:
+                    log_files = recent_log_files(cls.log_dir, MAX_PROPOSAL_LOG_FILES)
+                    proposals = parse_recent_proposals(log_files)
+                    non_empty = sum(1 for proposal in proposals if proposal.get("tx_count", 0) > 0)
+                    latest = proposals[-1] if proposals else None
+                    cls.proposal_cache = {
+                        "summary": {
+                            "proposals_recent": len(proposals),
+                            "non_empty_recent": non_empty,
+                            "zero_tx_recent": len(proposals) - non_empty,
+                            "last_proposal_at": latest.get("timestamp") if latest else "",
+                            "last_slot": latest.get("slot") if latest else None,
+                            "last_block_id": latest.get("block_id") if latest else "",
+                            "window_files": len(log_files),
+                        },
+                        "recent": proposals[-MAX_RECENT_PROPOSALS:],
+                    }
+                    cls.proposal_cache_last_refresh = now
+
+        payload = cls.proposal_cache
+        self._send_json(
+            {
+                "ok": True,
+                "summary": payload.get("summary", {}),
+                "recent": payload.get("recent", []),
             }
         )
 

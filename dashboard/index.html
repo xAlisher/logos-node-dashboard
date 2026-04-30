@@ -95,6 +95,13 @@
       font-size: 18px;
     }
 
+    .panel-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 12px;
+      margin: 12px 0 14px;
+    }
+
     .row {
       display: flex;
       flex-wrap: wrap;
@@ -222,6 +229,44 @@
 
     .message-meta code {
       color: var(--muted);
+    }
+
+    .proposal-table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #030504;
+    }
+
+    .proposal-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    .proposal-table th,
+    .proposal-table td {
+      padding: 10px 12px;
+      text-align: left;
+      border-bottom: 1px solid rgba(57, 255, 136, 0.08);
+      vertical-align: top;
+    }
+
+    .proposal-table th {
+      color: var(--muted);
+      font-size: 12px;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      background: rgba(6, 10, 7, 0.92);
+    }
+
+    .proposal-table tr:last-child td {
+      border-bottom: none;
+    }
+
+    .proposal-status {
+      color: var(--accent);
+      font-weight: 700;
     }
 
     .pill {
@@ -393,6 +438,50 @@
     </div>
 
     <div class="panel">
+      <h2>Block Proposals</h2>
+      <div class="meta" id="proposalMeta">Loading proposal activity…</div>
+      <div class="panel-grid">
+        <div class="card">
+          <div class="label">Recent Proposals</div>
+          <div id="proposalsToday" class="value">-</div>
+        </div>
+        <div class="card">
+          <div class="label">Non-empty Recent</div>
+          <div id="nonEmptyToday" class="value">-</div>
+        </div>
+        <div class="card">
+          <div class="label">0-tx Recent</div>
+          <div id="zeroTxToday" class="value">-</div>
+        </div>
+        <div class="card">
+          <div class="label">Last Slot</div>
+          <div id="lastProposalSlot" class="value">-</div>
+        </div>
+      </div>
+      <div class="row" style="margin-bottom: 12px;">
+        <div><strong>Last block:</strong> <code id="lastProposalBlock">-</code></div>
+      </div>
+      <div class="proposal-table-wrap">
+        <table class="proposal-table">
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Slot</th>
+              <th>Block ID</th>
+              <th>Tx</th>
+              <th>Removed</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="proposalRows">
+            <tr><td colspan="6">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div id="proposalError" class="error" style="margin-top: 12px;"></div>
+    </div>
+
+    <div class="panel">
       <h2>Zone Messages</h2>
       <div class="meta" id="zoneMeta">Loading zone messages…</div>
       <div id="zoneTabs" class="tabs" aria-label="Zone channels"></div>
@@ -438,6 +527,14 @@
       apiUrl: document.getElementById("apiUrl"),
       lastRefresh: document.getElementById("lastRefresh"),
       statusError: document.getElementById("statusError"),
+      proposalMeta: document.getElementById("proposalMeta"),
+      proposalsToday: document.getElementById("proposalsToday"),
+      nonEmptyToday: document.getElementById("nonEmptyToday"),
+      zeroTxToday: document.getElementById("zeroTxToday"),
+      lastProposalSlot: document.getElementById("lastProposalSlot"),
+      lastProposalBlock: document.getElementById("lastProposalBlock"),
+      proposalRows: document.getElementById("proposalRows"),
+      proposalError: document.getElementById("proposalError"),
       zoneComposer: document.getElementById("zoneComposer"),
       zoneInput: document.getElementById("zoneInput"),
       zoneSend: document.getElementById("zoneSend"),
@@ -459,6 +556,7 @@
     let latestZoneChannels = [];
     const ZONE_REFRESH_MS = 5000;
     const PANEL_REFRESH_MS = 5000;
+    const PROPOSAL_REFRESH_MS = 20000;
 
     function setMode(mode) {
       els.mode.textContent = mode || "-";
@@ -499,6 +597,24 @@
       }
     }
 
+    function shortId(value) {
+      const text = String(value || "");
+      return text.length > 16 ? `${text.slice(0, 12)}...` : text || "-";
+    }
+
+    function formatIsoLocal(value) {
+      const parsed = Date.parse(value || "");
+      if (!Number.isFinite(parsed)) return value || "-";
+      return new Date(parsed).toLocaleString([], {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+      });
+    }
+
     async function loadLogs() {
       try {
         const res = await fetch("/api/logs", { cache: "no-store" });
@@ -511,6 +627,60 @@
       } catch (err) {
         els.logMeta.textContent = "Logs unavailable";
         els.logs.textContent = String(err);
+      }
+    }
+
+    async function loadProposals() {
+      try {
+        const res = await fetch("/api/proposals", { cache: "no-store" });
+        const data = await res.json();
+        if (!res.ok || !data.ok) {
+          throw new Error(data.error || "Proposal request failed");
+        }
+
+        const summary = data.summary || {};
+        const recent = [...(data.recent || [])].reverse();
+        els.proposalsToday.textContent = summary.proposals_recent ?? "-";
+        els.nonEmptyToday.textContent = summary.non_empty_recent ?? "-";
+        els.zeroTxToday.textContent = summary.zero_tx_recent ?? "-";
+        els.lastProposalSlot.textContent = summary.last_slot ?? "-";
+        els.lastProposalBlock.textContent = shortId(summary.last_block_id);
+        els.lastProposalBlock.title = summary.last_block_id || "";
+        els.proposalMeta.textContent = summary.last_proposal_at
+          ? `Last proposal: ${formatIsoLocal(summary.last_proposal_at)}; window: latest ${summary.window_files ?? "-"} log files`
+          : "No recent proposal activity found.";
+        els.proposalError.textContent = "";
+
+        if (!recent.length) {
+          els.proposalRows.innerHTML = '<tr><td colspan="6">No recent proposals.</td></tr>';
+          return;
+        }
+
+        els.proposalRows.replaceChildren(
+          ...recent.map((proposal) => {
+            const row = document.createElement("tr");
+            const fields = [
+              formatIsoLocal(proposal.timestamp),
+              proposal.slot ?? "-",
+              shortId(proposal.block_id),
+              proposal.tx_count ?? "-",
+              proposal.removed_count ?? "-",
+              proposal.status ?? "proposed",
+            ];
+            fields.forEach((field, index) => {
+              const cell = document.createElement("td");
+              cell.textContent = String(field);
+              if (index === 2) cell.title = proposal.block_id || "";
+              if (index === 5) cell.className = "proposal-status";
+              row.append(cell);
+            });
+            return row;
+          })
+        );
+      } catch (err) {
+        els.proposalMeta.textContent = "Proposal activity unavailable";
+        els.proposalRows.innerHTML = '<tr><td colspan="6">Proposal activity unavailable.</td></tr>';
+        els.proposalError.textContent = String(err);
       }
     }
 
@@ -551,6 +721,36 @@
       return "unknown";
     }
 
+    function messageRank(message) {
+      const status = messageStatus(message);
+      if (status === "finalized") return 4;
+      if (message.block_id) return 3;
+      if (status === "confirmed") return 2;
+      if (status === "pending") return 1;
+      return 0;
+    }
+
+    function preferredMessage(a, b) {
+      if (messageRank(b) > messageRank(a)) return { ...a, ...b, text: messageText(b) || messageText(a) };
+      if (messageRank(a) > messageRank(b)) return { ...b, ...a, text: messageText(a) || messageText(b) };
+      return messageText(b).length > messageText(a).length
+        ? { ...a, ...b, text: messageText(b) }
+        : { ...b, ...a, text: messageText(a) };
+    }
+
+    function sameMessage(a, b) {
+      const aText = canonicalMessageText(a);
+      const bText = canonicalMessageText(b);
+      if (!aText || !bText) return false;
+      if (a.block_id && b.block_id && a.block_id === b.block_id) return true;
+      if (a.slot != null && b.slot != null && Number(a.slot) === Number(b.slot) && aText === bText) return true;
+
+      const shorter = aText.length <= bText.length ? aText : bText;
+      const longer = aText.length > bText.length ? aText : bText;
+      if (shorter.length < 12) return false;
+      return longer.startsWith(shorter) || longer.includes(shorter);
+    }
+
     function getLiveChannels(live) {
       return live?.channels?.length
         ? live.channels
@@ -561,17 +761,13 @@
       const key = messageKey(incoming);
       const keyIndex = messages.findIndex((message) => messageKey(message) === key);
       if (keyIndex >= 0) {
-        messages[keyIndex] = { ...messages[keyIndex], ...incoming };
+        messages[keyIndex] = preferredMessage(messages[keyIndex], incoming);
         return;
       }
 
-      const incomingText = canonicalMessageText(incoming);
-      const prefixIndex = messages.findIndex((message) => {
-        const existingText = canonicalMessageText(message);
-        return message.block_id && incomingText && existingText && existingText.startsWith(incomingText);
-      });
-      if (prefixIndex >= 0) {
-        messages[prefixIndex] = { ...incoming, ...messages[prefixIndex] };
+      const duplicateIndex = messages.findIndex((message) => sameMessage(message, incoming));
+      if (duplicateIndex >= 0) {
+        messages[duplicateIndex] = preferredMessage(messages[duplicateIndex], incoming);
         return;
       }
 
@@ -874,8 +1070,10 @@
     }
 
     refreshPanels();
+    loadProposals();
     loadZoneMessages();
     setInterval(refreshPanels, PANEL_REFRESH_MS);
+    setInterval(loadProposals, PROPOSAL_REFRESH_MS);
     setInterval(loadZoneMessages, ZONE_REFRESH_MS);
   </script>
 </body>
