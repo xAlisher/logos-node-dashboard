@@ -49,9 +49,13 @@
       margin-bottom: 24px;
     }
 
+    .subtitle code {
+      color: var(--text);
+    }
+
     .grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      grid-template-columns: repeat(3, minmax(0, 1fr));
       gap: 12px;
       margin-bottom: 20px;
     }
@@ -390,6 +394,10 @@
     }
 
     @media (max-width: 640px) {
+      .grid {
+        grid-template-columns: 1fr;
+      }
+
       .composer {
         grid-template-columns: 1fr;
       }
@@ -399,7 +407,7 @@
 <body>
   <div class="wrap">
     <h1>Logos Node Status</h1>
-    <div class="subtitle">Local dashboard for sync state and recent node logs.</div>
+    <div id="subtitle" class="subtitle">Local dashboard for sync state and recent node logs.</div>
 
     <div class="grid">
       <div class="card">
@@ -421,6 +429,10 @@
       <div class="card">
         <div class="label">Balance</div>
         <div id="balance" class="value">-</div>
+      </div>
+      <div class="card">
+        <div class="label">Peers</div>
+        <div id="peerCount" class="value">-</div>
       </div>
     </div>
 
@@ -522,6 +534,7 @@
       slot: document.getElementById("slot"),
       libSlot: document.getElementById("libSlot"),
       balance: document.getElementById("balance"),
+      peerCount: document.getElementById("peerCount"),
       tip: document.getElementById("tip"),
       lib: document.getElementById("lib"),
       apiUrl: document.getElementById("apiUrl"),
@@ -550,6 +563,7 @@
       subscribeCancel: document.getElementById("subscribeCancel"),
       logMeta: document.getElementById("logMeta"),
       logs: document.getElementById("logs"),
+      subtitle: document.getElementById("subtitle"),
     };
 
     let selectedZoneChannel = "all";
@@ -585,12 +599,23 @@
           els.balance.textContent = "-";
           els.balance.title = data.wallet?.error || "";
         }
+        if (data.network?.ok) {
+          els.peerCount.textContent = data.network.n_peers ?? "-";
+          els.peerCount.title = `${data.network.n_connections ?? 0} connections`;
+        } else {
+          els.peerCount.textContent = "-";
+          els.peerCount.title = data.network?.error || "";
+        }
         els.tip.textContent = data.tip ?? "-";
         els.lib.textContent = data.lib ?? "-";
         els.apiUrl.textContent = data.url ?? "-";
+        els.subtitle.innerHTML = data.node_version
+          ? `Local dashboard for sync state and recent node logs. Compatible with: <code>logos-blockchain-node ${data.node_version}</code>`
+          : "Local dashboard for sync state and recent node logs.";
         els.statusError.textContent = "";
       } catch (err) {
         setMode("Offline");
+        els.subtitle.textContent = "Local dashboard for sync state and recent node logs.";
         els.statusError.textContent = String(err);
       } finally {
         els.lastRefresh.textContent = new Date().toLocaleTimeString();
@@ -1039,7 +1064,6 @@
     });
 
     els.subscribeCancel.addEventListener("click", closeSubscribeModal);
-
     els.subscribeModal.addEventListener("click", (event) => {
       if (event.target === els.subscribeModal) closeSubscribeModal();
     });

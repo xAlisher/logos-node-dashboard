@@ -2,14 +2,28 @@
 
 Small local dashboard for a Logos Blockchain node and `zone-board`.
 
+Compatible with:
+
+- `logos-blockchain-node 0.1.2`
+
 It shows:
 
 - node mode, height, tip, LIB, slot, and LIB slot from `/cryptarchia/info`
+- wallet balance from `/wallet/<public_key>/balance`
+- peer count from `/network/info`
+- recent block proposal activity from recent node logs
 - recent node logs from the newest log file
 - zone-board messages from cache
 - live zone-board TUI messages from tmux
 - local publish and subscribe actions through the running zone-board tmux session
 - best-effort finality labels for local live messages by matching node logs against current LIB slot
+
+The `Block Proposals` panel includes:
+
+- recent proposal count
+- non-empty vs `0-tx` proposals
+- latest proposal slot and block id
+- recent proposal table with tx counts and mempool removals
 
 ## Requirements
 
@@ -46,6 +60,7 @@ NODE_LOG_DIR=state/live-v0.1.2/logs
 ZONE_BOARD_DIR=state/zone-board-v0.2.2
 ZONE_BOARD_TMUX_SESSION=zone-board
 ZONE_CHANNEL=your-channel
+WALLET_PUBLIC_KEY=
 ```
 
 Example:
@@ -73,7 +88,8 @@ python3 dashboard/server.py \
   --log-dir state/live-v0.1.2/logs \
   --zone-board-dir state/zone-board-v0.2.2 \
   --zone-board-tmux-session zone-board \
-  --local-zone-channel alice
+  --local-zone-channel alice \
+  --wallet-public-key <your-wallet-public-key>
 ```
 
 ## Running Zone Board
@@ -107,4 +123,5 @@ The dashboard code is safe to publish; runtime state is not.
 
 - Local live messages can show before zone-board writes them to cache.
 - Finality labels are best-effort and depend on node logs containing `ChannelInscribe` debug records.
+- Proposal activity is intentionally based on a bounded recent log window, not full historical indexing.
 - The dashboard controls the zone-board TUI through tmux keystrokes, so keep a dedicated tmux session for it.

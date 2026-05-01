@@ -8,6 +8,13 @@ Local runbook and dashboard helpers for running a Logos Blockchain testnet node.
 
 The reusable dashboard lives in [`dashboard/`](dashboard/README.md).
 
+Current dashboard highlights:
+
+- compatible with `logos-blockchain-node 0.1.2`
+- node mode, chain progress, wallet balance, and peer count
+- block proposal panel with recent proposal activity
+- zone-board messages, live TUI sync, and local inscribing controls
+
 Start it from this directory:
 
 ```bash

@@ -21,6 +21,7 @@ from threading import Lock
 ROOT = Path(__file__).resolve().parent
 RUNBOOK_ROOT = ROOT.parent
 DEFAULT_NODE_API = "http://127.0.0.1:8080"
+DEFAULT_NODE_BINARY = RUNBOOK_ROOT / "artifacts/node/logos-blockchain-node"
 DEFAULT_LOG_DIR = RUNBOOK_ROOT / "state/live-v0.1.2/logs"
 DEFAULT_ZONE_BOARD_DIR = RUNBOOK_ROOT / "state/zone-board-v0.2.2"
 DEFAULT_LIVE_CHANNEL_CACHE_NAME = "dashboard-live-channels.json"
@@ -52,6 +53,7 @@ PROPOSAL_RE = re.compile(
 PROPOSAL_APPLIED_RE = re.compile(
     r"Successfully applied our own proposed block\. Publishing it to the blend network: HeaderId\(([0-9a-f]+)\)"
 )
+NODE_VERSION_RE = re.compile(r"^logos-blockchain-node\s+([^\s]+)$", re.MULTILINE)
 
 
 def latest_log_file(log_dir: Path) -> Path | None:
@@ -276,6 +278,22 @@ def parse_datetime(value: str | None) -> datetime | None:
         return None
 
 
+def detect_node_version(node_binary: Path) -> str:
+    try:
+        output = subprocess.run(
+            [str(node_binary), "--version"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=3,
+        ).stdout
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        return ""
+
+    match = NODE_VERSION_RE.search(output)
+    return match.group(1) if match else ""
+
+
 def parse_zone_board_tui(capture: str) -> dict:
     channel = None
     messages = []
@@ -374,6 +392,8 @@ def save_live_channels(path: Path, channels: dict[str, list[dict]]) -> None:
 
 class DashboardHandler(BaseHTTPRequestHandler):
     node_api = DEFAULT_NODE_API
+    node_binary = DEFAULT_NODE_BINARY
+    node_version = ""
     log_dir = DEFAULT_LOG_DIR
     zone_board_dir = DEFAULT_ZONE_BOARD_DIR
     zone_board_tmux_session = DEFAULT_ZONE_BOARD_TMUX_SESSION
@@ -596,6 +616,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
         payload["ok"] = True
         payload["url"] = url
+        payload["node_version"] = self.node_version
+        payload["network"] = self._network_info()
         payload["wallet"] = self._wallet_balance()
         self._send_json(payload)
 
@@ -629,6 +651,29 @@ class DashboardHandler(BaseHTTPRequestHandler):
             "url": url,
             "address": public_key,
             "error": "Unexpected wallet balance response",
+        }
+
+    def _network_info(self) -> dict:
+        url = f"{self.node_api}/network/info"
+        try:
+            with urllib.request.urlopen(url, timeout=2) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except (urllib.error.URLError, json.JSONDecodeError, TimeoutError) as exc:
+            return {
+                "ok": False,
+                "url": url,
+                "error": str(exc),
+            }
+
+        if isinstance(payload, dict):
+            payload["ok"] = True
+            payload["url"] = url
+            return payload
+
+        return {
+            "ok": False,
+            "url": url,
+            "error": "Unexpected network info response",
         }
 
     def _serve_logs(self) -> None:
@@ -1006,6 +1051,8 @@ def main() -> None:
     args = parser.parse_args()
 
     DashboardHandler.node_api = args.node_api.rstrip("/")
+    DashboardHandler.node_binary = DEFAULT_NODE_BINARY
+    DashboardHandler.node_version = detect_node_version(DashboardHandler.node_binary)
     DashboardHandler.log_dir = Path(args.log_dir)
     DashboardHandler.zone_board_dir = Path(args.zone_board_dir)
     DashboardHandler.zone_board_tmux_session = args.zone_board_tmux_session
