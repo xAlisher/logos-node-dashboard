@@ -163,10 +163,16 @@ panic: "Could not find logos-blockchain-circuits directory.
 
 Cause: the ZK circuits are needed to produce leadership proofs. The node expects them at `~/.logos-blockchain-circuits`. The original machine had this set up; the new machine does not. The crash only happens the first time the node wins a slot lottery — which may be hours after migration, making it easy to miss.
 
-Fix — run this on the new machine immediately after migration:
+Fix — run this on the new machine immediately after migration. Point to the versioned subdirectory, not its parent:
 ```bash
-ln -s ~/logos-blockchain-runbook/artifacts/circuits ~/.logos-blockchain-circuits
+ln -s ~/logos-blockchain-runbook/artifacts/circuits/logos-blockchain-circuits-v<VERSION>-linux-x86_64 \
+  ~/.logos-blockchain-circuits
 ```
+Verify it exposes the right structure:
+```bash
+ls ~/.logos-blockchain-circuits   # must show: poc  pol  poq  prover  verifier  VERSION  zksign
+```
+If it shows `logos-blockchain-circuits-v*` instead, the symlink points one level too high.
 
 ---
 
