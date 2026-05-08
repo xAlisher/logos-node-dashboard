@@ -1,6 +1,6 @@
-# Migrating logos-node to an always-on server
+# Migrating logos-node + dashboard to an always-on server
 
-Guide for moving a running logos-blockchain-node (+ zone-board, zone-scanner, dashboard) from a dev machine to a dedicated server with minimal downtime.
+Guide for moving a running logos-blockchain-node, zone-board, zone-scanner, and the node dashboard from a dev machine to a dedicated server with minimal downtime.
 
 ---
 
