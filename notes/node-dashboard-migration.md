@@ -1,6 +1,6 @@
 # Migrating logos-node + dashboard to an always-on server
 
-Guide for moving a running logos-blockchain-node, zone-board, zone-scanner, and the node dashboard from a dev machine to a dedicated server with minimal downtime.
+Guide for moving a running logos-blockchain-node, zone-board, and the node dashboard from a dev machine to a dedicated server with minimal downtime.
 
 ---
 
@@ -16,12 +16,8 @@ The migration uses a non-destructive approach: prep and test on the new server w
 
 ```bash
 # On new server
-sudo apt install -y tmux pkg-config libssl-dev
+sudo apt install -y tmux
 pip3 install httpx --break-system-packages
-
-# Rust (for zone-scanner)
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-source ~/.cargo/env
 
 # Log directory (adjust path to your storage)
 sudo mkdir -p /your/log/dir && sudo chown $USER:$USER /your/log/dir
@@ -41,8 +37,6 @@ If 8080 is taken, choose a free port (e.g. 8085) and update everywhere:
 
 - `configs/live/node.yaml` → `listen_address: 0.0.0.0:<PORT>`
 - `run-zone-board.sh` → `NODE_URL` default
-- `zone-scanner/src/main.rs` → `const NODE_URL` (hardcoded — requires rebuild)
-- `publish.py` → `NODE_URL` default
 - Any sequencer config that references the node URL
 
 ---
@@ -51,9 +45,7 @@ If 8080 is taken, choose a free port (e.g. 8085) and update everywhere:
 
 ```bash
 # From old machine
-rsync -av ~/logos-blockchain-runbook/          newserver:~/logos-blockchain-runbook/
-rsync -av ~/logos-node-visualizer/             newserver:~/logos-node-visualizer/
-rsync -av ~/zone_scan.json ~/zone_scan_state.json newserver:~/
+rsync -av ~/logos-blockchain-runbook/ newserver:~/logos-blockchain-runbook/
 
 # Update log path in node.yaml on new server only
 ssh newserver "sed -i 's|directory: ./state/live-v0.1.2/logs|directory: /your/log/dir|' \
@@ -64,11 +56,6 @@ Fix any hardcoded home directory paths in scripts:
 ```bash
 ssh newserver "sed -i 's|/home/olduser/|/home/newuser/|g' \
   ~/logos-blockchain-runbook/run-zone-board.sh"
-```
-
-Build zone-scanner on new server:
-```bash
-ssh newserver 'source ~/.cargo/env && cd ~/logos-node-visualizer/zone-scanner && cargo build --release 2>&1 | tail -5'
 ```
 
 ---
@@ -103,7 +90,6 @@ ssh newserver 'kill $(pgrep -f node-test.yaml) 2>/dev/null; \
 
 ```bash
 # 1. Final sync while old node still running
-rsync -av ~/zone_scan.json ~/zone_scan_state.json newserver:~/
 rsync -av ~/logos-blockchain-runbook/state/live-v0.1.2/db/ \
   newserver:~/logos-blockchain-runbook/state/live-v0.1.2/db/
 rsync -av ~/logos-blockchain-runbook/state/zone-board-v0.2.2/ \
@@ -112,7 +98,7 @@ rsync -av ~/logos-blockchain-runbook/state/zone-board-v0.2.2/ \
 # 2. Stop old node (check for systemd service first)
 systemctl --user stop logos-node 2>/dev/null && systemctl --user disable logos-node 2>/dev/null
 # Also kill any stray processes
-kill $(pgrep -f zone-scanner) $(pgrep -f "dashboard/server.py") 2>/dev/null
+kill $(pgrep -f "dashboard/server.py") 2>/dev/null
 tmux kill-session -t zone-board 2>/dev/null
 kill $(pgrep -f zone-board) 2>/dev/null
 sleep 3
@@ -120,7 +106,6 @@ kill $(pgrep -f logos-blockchain-node) 2>/dev/null
 sleep 5
 
 # 3. Final delta
-rsync -av ~/zone_scan.json ~/zone_scan_state.json newserver:~/
 rsync -av ~/logos-blockchain-runbook/state/live-v0.1.2/db/ \
   newserver:~/logos-blockchain-runbook/state/live-v0.1.2/db/
 
@@ -132,8 +117,7 @@ ssh newserver 'curl -s http://127.0.0.1:<PORT>/cryptarchia/info'
 
 ssh newserver 'cd ~/logos-blockchain-runbook && nohup bash run-zone-board.sh \
   >> /your/log/dir/zone-board.log 2>&1 &'
-ssh newserver 'cd ~/logos-node-visualizer && nohup ./zone-scanner/target/release/zone-scanner \
-  >> /your/log/dir/zone-scanner.log 2>&1 &'
+
 ssh newserver 'cd ~/logos-blockchain-runbook && nohup python3 dashboard/server.py \
   --host 0.0.0.0 --port 8090 \
   --node-api http://127.0.0.1:<PORT> \
@@ -183,17 +167,6 @@ Fix: restart the node once more. On the second clean start it initialises correc
 
 ---
 
-**zone-scanner port is hardcoded in Rust source**
-
-If you change the node port, you must patch and rebuild:
-```bash
-sed -i 's|const NODE_URL: &str = "http://127.0.0.1:<OLD>"|const NODE_URL: \&str = "http://127.0.0.1:<NEW>"|' \
-  zone-scanner/src/main.rs
-cd zone-scanner && cargo build --release
-```
-
----
-
 **Old machine has a systemd service restarting the node**
 
 `kill` alone is not enough if `logos-node.service` is enabled. Always:
@@ -219,6 +192,4 @@ systemctl --user enable logos-node && systemctl --user start logos-node
 # or manually:
 nohup artifacts/node/logos-blockchain-node configs/live/node.yaml >> /tmp/node.log 2>&1 &
 bash run-zone-board.sh &
-cd ~/logos-node-visualizer
-nohup ./zone-scanner/target/release/zone-scanner >> /tmp/zone-scanner.log 2>&1 &
 ```
