@@ -152,6 +152,24 @@ ssh newserver 'tmux ls'
 
 ## Known issues
 
+**Node panics on first block proposal — circuits directory missing**
+
+Symptom: node syncs and connects to peers normally, then crashes when it first wins a slot:
+```
+panic: "Could not find logos-blockchain-circuits directory.
+  1. Set LOGOS_BLOCKCHAIN_CIRCUITS env var, or
+  2. Place circuits at /home/<user>/.logos-blockchain-circuits"
+```
+
+Cause: the ZK circuits are needed to produce leadership proofs. The node expects them at `~/.logos-blockchain-circuits`. The original machine had this set up; the new machine does not. The crash only happens the first time the node wins a slot lottery — which may be hours after migration, making it easy to miss.
+
+Fix — run this on the new machine immediately after migration:
+```bash
+ln -s ~/logos-blockchain-runbook/artifacts/circuits ~/.logos-blockchain-circuits
+```
+
+---
+
 **Wallet service fails on restart after mid-run kill**
 
 Symptom: `/wallet/.../balance` returns 408 or hangs. Node logs show:
