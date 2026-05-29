@@ -607,7 +607,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
         try:
             with urllib.request.urlopen(url, timeout=2) as response:
                 payload = json.loads(response.read().decode("utf-8"))
-        except urllib.error.URLError as exc:
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
             self._send_json(
                 {
                     "ok": False,
@@ -680,7 +680,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
         try:
             with urllib.request.urlopen(url, timeout=2) as response:
                 payload = json.loads(response.read().decode("utf-8"))
-        except (urllib.error.URLError, json.JSONDecodeError, TimeoutError) as exc:
+        except (urllib.error.URLError, json.JSONDecodeError, TimeoutError, OSError) as exc:
             return {
                 "ok": False,
                 "url": url,
