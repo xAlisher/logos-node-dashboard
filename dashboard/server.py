@@ -410,6 +410,10 @@ class DashboardHandler(BaseHTTPRequestHandler):
     proposal_cache_lock = Lock()
     proposal_cache_last_refresh = 0.0
     proposal_cache: dict = {"summary": {}, "recent": []}
+    _wallet_cache: dict = {}
+    _wallet_cache_lock = Lock()
+    _wallet_cache_ts: float = 0.0
+    _WALLET_CACHE_TTL: float = 15.0
 
     def do_GET(self) -> None:
         if self.path in ("/", "/index.html"):
@@ -629,29 +633,47 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 "error": "Wallet public key not configured",
             }
 
-        url = f"{self.node_api}/wallet/{public_key}/balance"
-        try:
-            with urllib.request.urlopen(url, timeout=2) as response:
-                payload = json.loads(response.read().decode("utf-8"))
-        except (urllib.error.URLError, json.JSONDecodeError, TimeoutError) as exc:
-            return {
-                "ok": False,
-                "url": url,
-                "address": public_key,
-                "error": str(exc),
-            }
+        cls = self.__class__
+        now = time.time()
 
-        if isinstance(payload, dict):
-            payload["ok"] = True
-            payload["url"] = url
-            return payload
+        # Return cached result if still fresh (double-checked locking)
+        if cls._wallet_cache and now - cls._wallet_cache_ts < cls._WALLET_CACHE_TTL:
+            return dict(cls._wallet_cache)
 
-        return {
-            "ok": False,
-            "url": url,
-            "address": public_key,
-            "error": "Unexpected wallet balance response",
-        }
+        with cls._wallet_cache_lock:
+            if cls._wallet_cache and time.time() - cls._wallet_cache_ts < cls._WALLET_CACHE_TTL:
+                return dict(cls._wallet_cache)
+
+            url = f"{self.node_api}/wallet/{public_key}/balance"
+            try:
+                with urllib.request.urlopen(url, timeout=2) as response:
+                    payload = json.loads(response.read().decode("utf-8"))
+            except (urllib.error.URLError, json.JSONDecodeError, TimeoutError, OSError) as exc:
+                result: dict = {
+                    "ok": False,
+                    "url": url,
+                    "address": public_key,
+                    "error": str(exc),
+                }
+                cls._wallet_cache = result
+                cls._wallet_cache_ts = time.time()
+                return dict(result)
+
+            if isinstance(payload, dict):
+                payload["ok"] = True
+                payload["url"] = url
+                result = payload
+            else:
+                result = {
+                    "ok": False,
+                    "url": url,
+                    "address": public_key,
+                    "error": "Unexpected wallet balance response",
+                }
+
+            cls._wallet_cache = result
+            cls._wallet_cache_ts = time.time()
+            return dict(result)
 
     def _network_info(self) -> dict:
         url = f"{self.node_api}/network/info"
