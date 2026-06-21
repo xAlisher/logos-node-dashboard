@@ -8,6 +8,7 @@ HOST="${HOST:-127.0.0.1}"
 PORT="${PORT:-8090}"
 NODE_API="${NODE_API:-http://127.0.0.1:8080}"
 NODE_LOG_DIR="${NODE_LOG_DIR:-$RUNBOOK_ROOT/state/live-v0.1.2/logs}"
+NODE_UNIT="${NODE_UNIT:-logos-node}"
 ZONE_BOARD_DIR="${ZONE_BOARD_DIR:-$RUNBOOK_ROOT/state/zone-board-v0.2.2}"
 ZONE_BOARD_TMUX_SESSION="${ZONE_BOARD_TMUX_SESSION:-zone-board}"
 ZONE_CHANNEL="${ZONE_CHANNEL:-local}"
@@ -25,6 +26,7 @@ exec python3 dashboard/server.py \
   --port "$PORT" \
   --node-api "$NODE_API" \
   --log-dir "$NODE_LOG_DIR" \
+  --node-unit "$NODE_UNIT" \
   --zone-board-dir "$ZONE_BOARD_DIR" \
   --zone-board-tmux-session "$ZONE_BOARD_TMUX_SESSION" \
   --local-zone-channel "$ZONE_CHANNEL" \
