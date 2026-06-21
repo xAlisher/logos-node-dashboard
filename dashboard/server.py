@@ -764,17 +764,20 @@ class DashboardHandler(BaseHTTPRequestHandler):
             with cls.proposal_cache_lock:
                 now = time.monotonic()
                 if now - cls.proposal_cache_last_refresh >= PROPOSAL_REFRESH_SECS:
+                    # Prefer file logs (Sneg), but fall back to journald whenever the
+                    # files yield no proposals. This covers stdout->journald nodes
+                    # (optiplex) AND misconfigured/stale log dirs. journald returns []
+                    # for genuine file-logging nodes, so there is no regression.
                     log_files = recent_log_files(cls.log_dir, MAX_PROPOSAL_LOG_FILES)
-                    if log_files:
-                        # File-logging nodes (e.g. Sneg): parse the recent log files.
-                        proposals = parse_recent_proposals(log_files)
-                        source = "files"
-                    else:
-                        # stdout -> journald nodes (e.g. optiplex): read the user journal.
-                        proposals = parse_recent_proposals_from_journal(
+                    proposals = parse_recent_proposals(log_files) if log_files else []
+                    source = "files"
+                    if not proposals:
+                        journal_proposals = parse_recent_proposals_from_journal(
                             cls.node_unit, MAX_PROPOSAL_JOURNAL_LINES
                         )
-                        source = "journal"
+                        if journal_proposals:
+                            proposals = journal_proposals
+                            source = "journal"
                     non_empty = sum(1 for proposal in proposals if proposal.get("tx_count", 0) > 0)
                     latest = proposals[-1] if proposals else None
                     cls.proposal_cache = {
