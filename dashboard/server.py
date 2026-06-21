@@ -37,8 +37,11 @@ MAX_LOG_METADATA_FILES = 3
 MAX_CHANNEL_METADATA_MATCHES = 4
 MAX_RECENT_PROPOSALS = 20
 MAX_PROPOSAL_LOG_FILES = 4
-# Bounded journal window for nodes that log to stdout -> journald (no file logs).
-MAX_PROPOSAL_JOURNAL_LINES = 5000
+# Journal window for nodes that log to stdout -> journald (no useful file logs).
+# Bounded by time so the scan cost stays flat as the journal grows; --grep keeps
+# the returned output tiny regardless of node verbosity.
+PROPOSAL_JOURNAL_SINCE = "-24 hours"
+PROPOSAL_JOURNAL_TIMEOUT_SECS = 30
 DEFAULT_NODE_UNIT = "logos-node"
 TUI_MESSAGE_RE = re.compile(r"^\s*(\d{2}:\d{2}:\d{2})\s+(.+?)\s*$")
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
@@ -276,28 +279,36 @@ def parse_recent_proposals(log_files: list[Path]) -> list[dict]:
     return _finalize_proposals(proposals)
 
 
-def journald_proposal_lines(unit: str, max_lines: int) -> list[str]:
-    """Recent journal lines for a user unit (nodes that log to stdout -> journald).
+def journald_proposal_lines(unit: str, since: str = PROPOSAL_JOURNAL_SINCE) -> list[str]:
+    """Proposal log lines for a user unit that logs to stdout -> journald.
 
-    Returns [] if journalctl is unavailable or the unit has no journal, so the
-    caller falls back to an empty proposal list rather than erroring.
+    Filters server-side with `--grep` so only the (sparse) proposal lines are
+    returned regardless of how chatty the node is, and bounds the scan with
+    `--since` so the cost stays flat as the journal grows. Returns [] if
+    journalctl is unavailable, the unit has no journal, or there are no matches
+    (--grep exits non-zero) — the caller then keeps its file-based result, so
+    file-logging nodes (Sneg) are unaffected.
     """
     try:
         output = subprocess.run(
-            ["journalctl", "--user", "-u", unit, "-n", str(max_lines), "--no-pager"],
+            [
+                "journalctl", "--user", "-u", unit,
+                "-p", "info", "--since", since, "--no-pager",
+                "--grep", "proposed block with id|Successfully applied our own proposed block",
+            ],
             check=True,
             capture_output=True,
             text=True,
-            timeout=8,
+            timeout=PROPOSAL_JOURNAL_TIMEOUT_SECS,
         ).stdout
     except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
         return []
     return output.splitlines()
 
 
-def parse_recent_proposals_from_journal(unit: str, max_lines: int) -> list[dict]:
+def parse_recent_proposals_from_journal(unit: str) -> list[dict]:
     proposals: dict[str, dict] = {}
-    for raw_line in journald_proposal_lines(unit, max_lines):
+    for raw_line in journald_proposal_lines(unit):
         _ingest_proposal_line(proposals, raw_line)
     return _finalize_proposals(proposals)
 
@@ -772,9 +783,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     proposals = parse_recent_proposals(log_files) if log_files else []
                     source = "files"
                     if not proposals:
-                        journal_proposals = parse_recent_proposals_from_journal(
-                            cls.node_unit, MAX_PROPOSAL_JOURNAL_LINES
-                        )
+                        journal_proposals = parse_recent_proposals_from_journal(cls.node_unit)
                         if journal_proposals:
                             proposals = journal_proposals
                             source = "journal"
