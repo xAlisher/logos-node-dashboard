@@ -37,6 +37,9 @@ MAX_LOG_METADATA_FILES = 3
 MAX_CHANNEL_METADATA_MATCHES = 4
 MAX_RECENT_PROPOSALS = 20
 MAX_PROPOSAL_LOG_FILES = 4
+# Bounded journal window for nodes that log to stdout -> journald (no file logs).
+MAX_PROPOSAL_JOURNAL_LINES = 5000
+DEFAULT_NODE_UNIT = "logos-node"
 TUI_MESSAGE_RE = re.compile(r"^\s*(\d{2}:\d{2}:\d{2})\s+(.+?)\s*$")
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 SLOT_RE = re.compile(r"slot: Slot\((\d+)\)")
@@ -191,67 +194,59 @@ def parse_log_metadata(log_file: Path) -> tuple[dict[str, dict], dict[str, dict[
     return block_metadata, channel_metadata
 
 
-def parse_recent_proposals(log_files: list[Path]) -> list[dict]:
-    proposals: dict[str, dict] = {}
+def _ingest_proposal_line(proposals: dict[str, dict], raw_line: str) -> None:
+    if "proposed block with id" not in raw_line and "Successfully applied our own proposed block" not in raw_line:
+        return
 
-    for log_file in log_files:
-        try:
-            handle = log_file.open("r", encoding="utf-8", errors="replace")
-        except OSError:
-            continue
+    line = ANSI_RE.sub("", raw_line)
+    if proposal_match := PROPOSAL_RE.search(line):
+        parent_block_id, slot, block_id, tx_count, removed_count = proposal_match.groups()
+        proposal = proposals.setdefault(
+            block_id,
+            {
+                "timestamp": parse_log_timestamp(line),
+                "slot": int(slot),
+                "parent_block_id": parent_block_id,
+                "block_id": block_id,
+                "tx_count": int(tx_count),
+                "removed_count": int(removed_count),
+                "applied_locally": False,
+                "published_to_network": False,
+                "status": "proposed",
+            },
+        )
+        proposal.update(
+            {
+                "timestamp": proposal.get("timestamp") or parse_log_timestamp(line),
+                "slot": int(slot),
+                "parent_block_id": parent_block_id,
+                "tx_count": int(tx_count),
+                "removed_count": int(removed_count),
+            }
+        )
+        return
 
-        with handle:
-            for raw_line in handle:
-                if "proposed block with id" not in raw_line and "Successfully applied our own proposed block" not in raw_line:
-                    continue
+    if applied_match := PROPOSAL_APPLIED_RE.search(line):
+        block_id = applied_match.group(1)
+        proposal = proposals.setdefault(
+            block_id,
+            {
+                "timestamp": parse_log_timestamp(line),
+                "slot": None,
+                "parent_block_id": "",
+                "block_id": block_id,
+                "tx_count": 0,
+                "removed_count": 0,
+                "applied_locally": False,
+                "published_to_network": False,
+                "status": "proposed",
+            },
+        )
+        proposal["applied_locally"] = True
+        proposal["published_to_network"] = True
 
-                line = ANSI_RE.sub("", raw_line)
-                if proposal_match := PROPOSAL_RE.search(line):
-                    parent_block_id, slot, block_id, tx_count, removed_count = proposal_match.groups()
-                    proposal = proposals.setdefault(
-                        block_id,
-                        {
-                            "timestamp": parse_log_timestamp(line),
-                            "slot": int(slot),
-                            "parent_block_id": parent_block_id,
-                            "block_id": block_id,
-                            "tx_count": int(tx_count),
-                            "removed_count": int(removed_count),
-                            "applied_locally": False,
-                            "published_to_network": False,
-                            "status": "proposed",
-                        },
-                    )
-                    proposal.update(
-                        {
-                            "timestamp": proposal.get("timestamp") or parse_log_timestamp(line),
-                            "slot": int(slot),
-                            "parent_block_id": parent_block_id,
-                            "tx_count": int(tx_count),
-                            "removed_count": int(removed_count),
-                        }
-                    )
-                    continue
 
-                if applied_match := PROPOSAL_APPLIED_RE.search(line):
-                    block_id = applied_match.group(1)
-                    proposal = proposals.setdefault(
-                        block_id,
-                        {
-                            "timestamp": parse_log_timestamp(line),
-                            "slot": None,
-                            "parent_block_id": "",
-                            "block_id": block_id,
-                            "tx_count": 0,
-                            "removed_count": 0,
-                            "applied_locally": False,
-                            "published_to_network": False,
-                            "status": "proposed",
-                        },
-                    )
-                    proposal["applied_locally"] = True
-                    proposal["published_to_network"] = True
-
+def _finalize_proposals(proposals: dict[str, dict]) -> list[dict]:
     sorted_proposals = sorted(
         proposals.values(),
         key=lambda proposal: parse_datetime(proposal.get("timestamp")) or datetime.min.replace(tzinfo=timezone.utc),
@@ -266,6 +261,45 @@ def parse_recent_proposals(log_files: list[Path]) -> list[dict]:
         else:
             proposal["status"] = "proposed"
     return sorted_proposals
+
+
+def parse_recent_proposals(log_files: list[Path]) -> list[dict]:
+    proposals: dict[str, dict] = {}
+    for log_file in log_files:
+        try:
+            handle = log_file.open("r", encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        with handle:
+            for raw_line in handle:
+                _ingest_proposal_line(proposals, raw_line)
+    return _finalize_proposals(proposals)
+
+
+def journald_proposal_lines(unit: str, max_lines: int) -> list[str]:
+    """Recent journal lines for a user unit (nodes that log to stdout -> journald).
+
+    Returns [] if journalctl is unavailable or the unit has no journal, so the
+    caller falls back to an empty proposal list rather than erroring.
+    """
+    try:
+        output = subprocess.run(
+            ["journalctl", "--user", "-u", unit, "-n", str(max_lines), "--no-pager"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=8,
+        ).stdout
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        return []
+    return output.splitlines()
+
+
+def parse_recent_proposals_from_journal(unit: str, max_lines: int) -> list[dict]:
+    proposals: dict[str, dict] = {}
+    for raw_line in journald_proposal_lines(unit, max_lines):
+        _ingest_proposal_line(proposals, raw_line)
+    return _finalize_proposals(proposals)
 
 
 def parse_datetime(value: str | None) -> datetime | None:
@@ -395,6 +429,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
     node_binary = DEFAULT_NODE_BINARY
     node_version = ""
     log_dir = DEFAULT_LOG_DIR
+    node_unit = DEFAULT_NODE_UNIT
     zone_board_dir = DEFAULT_ZONE_BOARD_DIR
     zone_board_tmux_session = DEFAULT_ZONE_BOARD_TMUX_SESSION
     local_zone_channel = DEFAULT_LOCAL_ZONE_CHANNEL
@@ -730,7 +765,16 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 now = time.monotonic()
                 if now - cls.proposal_cache_last_refresh >= PROPOSAL_REFRESH_SECS:
                     log_files = recent_log_files(cls.log_dir, MAX_PROPOSAL_LOG_FILES)
-                    proposals = parse_recent_proposals(log_files)
+                    if log_files:
+                        # File-logging nodes (e.g. Sneg): parse the recent log files.
+                        proposals = parse_recent_proposals(log_files)
+                        source = "files"
+                    else:
+                        # stdout -> journald nodes (e.g. optiplex): read the user journal.
+                        proposals = parse_recent_proposals_from_journal(
+                            cls.node_unit, MAX_PROPOSAL_JOURNAL_LINES
+                        )
+                        source = "journal"
                     non_empty = sum(1 for proposal in proposals if proposal.get("tx_count", 0) > 0)
                     latest = proposals[-1] if proposals else None
                     cls.proposal_cache = {
@@ -742,6 +786,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
                             "last_slot": latest.get("slot") if latest else None,
                             "last_block_id": latest.get("block_id") if latest else "",
                             "window_files": len(log_files),
+                            "source": source,
                         },
                         "recent": proposals[-MAX_RECENT_PROPOSALS:],
                     }
@@ -1048,6 +1093,12 @@ def main() -> None:
         default=os.environ.get("NODE_LOG_DIR", str(DEFAULT_LOG_DIR)),
     )
     parser.add_argument(
+        "--node-unit",
+        default=os.environ.get("NODE_UNIT", DEFAULT_NODE_UNIT),
+        help="systemd --user unit for the node, used to read proposals from journald "
+        "when no file logs exist (stdout-logging nodes).",
+    )
+    parser.add_argument(
         "--zone-board-dir",
         default=os.environ.get("ZONE_BOARD_DIR", str(DEFAULT_ZONE_BOARD_DIR)),
     )
@@ -1076,6 +1127,7 @@ def main() -> None:
     DashboardHandler.node_binary = DEFAULT_NODE_BINARY
     DashboardHandler.node_version = detect_node_version(DashboardHandler.node_binary)
     DashboardHandler.log_dir = Path(args.log_dir)
+    DashboardHandler.node_unit = args.node_unit
     DashboardHandler.zone_board_dir = Path(args.zone_board_dir)
     DashboardHandler.zone_board_tmux_session = args.zone_board_tmux_session
     DashboardHandler.local_zone_channel = args.local_zone_channel
