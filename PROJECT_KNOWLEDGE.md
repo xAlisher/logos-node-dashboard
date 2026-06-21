@@ -341,6 +341,21 @@ curl -sf http://127.0.0.1:8080/cryptarchia/info
   - bootnode addresses
   - cfgsync credentials for hosted devnet access
 
+## Retro — 2026-06-21 (power-cut recovery, self-heal guard, proposals visibility)
+
+### Wins
+- [project] Power-cut **orphan-tip crash loop** recovered with the `tip = lib` rollback (node back Online, no resync). The fix is now **durable**: a portable + dual-source (journald *and* file) self-heal guard committed into `run-node.sh` (here and in logos-node-starter), verified by a controlled restart (guard no-ops on a healthy start; tip preserved).
+- [project] Root-caused the recurring **journald-vs-file-log gap** — this kit logs to journald, so file-log assumptions silently break features. It had hidden BOTH the self-heal guard AND the dashboard Block Proposals panel on optiplex.
+- [project] **Block Proposals panel fixed** — `/api/proposals` now falls back to journald (`--grep`/`--since`, bounded scan) when file logs yield nothing; verified live (15 proposals, `source: journal`). Confirmed the node is a healthy proposing validator (~1.5% stake; 15/17 proposed blocks landed in-chain).
+- [process] Unbiased multi-reviewer comparison vs 0xSarnavo's dashboard (2 independent Claude tiers), claims hand-verified against the upstream repo before publishing the epic issue (#6).
+
+### Fails
+- [process] Asserted "node never proposed" **twice** before reading `chain_leader_service` logs (which showed 18 proposals). Wrong action: concluded a *negative* from a grep pattern (`proposing`/`created proposal`) that didn't match the real phrase (`proposed block with id`). Root cause: didn't validate the search pattern against actual log samples before claiming absence. Caught only by continuing to dig.
+- [project] The auto-rollback guard shipped for Sneg (file-log trigger) **silently never fired** on optiplex (journald) — the box ran with non-functional self-heal until a real power cut. Root cause: the recipe assumed file-only logs; a log-consumer must read where the node actually logs.
+- [project] **Two diverged `run-node.sh`** launchers (starter/scripts vs dashboard root; the deployed one hardcoded `/home/alisher`, broken for user `dar`). Root cause: launcher edited per-box instead of kept portable. Reconciled — both now portable (`BASH_SOURCE`) + guarded.
+- [process] Repeated SSH heredoc/quoting failures (parens in `echo`, `$0` vs positional args, `FETCH_HEAD` vs `origin/<branch>`) cost several round-trips. Fix: use `ssh host 'bash -l' <<'EOF'` for any non-trivial remote script; never inline parens in a double-quoted `ssh "..."`.
+- [project] The proposal parser first used line-count windowing (`-n 5000`) which returned nothing — the node is so verbose that sparse proposal lines scroll out of any sane window. Fixed with server-side `--grep` + `--since`. Root cause: assumed sparse events sit in a small recent line window.
+
 ## Evidence Summary
 
 - Binary health: confirmed via `--help`
