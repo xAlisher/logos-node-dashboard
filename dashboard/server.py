@@ -21,7 +21,7 @@ from threading import Lock
 ROOT = Path(__file__).resolve().parent
 RUNBOOK_ROOT = ROOT.parent
 DEFAULT_NODE_API = "http://127.0.0.1:8080"
-DEFAULT_NODE_BINARY = RUNBOOK_ROOT / "artifacts/node/logos-blockchain-node"
+DEFAULT_NODE_BINARY = Path(os.environ.get("NODE_BINARY", str(RUNBOOK_ROOT / "artifacts/node/logos-blockchain-node")))
 DEFAULT_LOG_DIR = RUNBOOK_ROOT / "state/live-v0.1.2/logs"
 DEFAULT_ZONE_BOARD_DIR = RUNBOOK_ROOT / "state/zone-board-v0.2.2"
 DEFAULT_LIVE_CHANNEL_CACHE_NAME = "dashboard-live-channels.json"
@@ -142,6 +142,23 @@ def timestamp_time(timestamp: str | None) -> str:
     return match.group(1) if match else ""
 
 
+def _flatten_cryptarchia(payload):
+    info = payload.get("cryptarchia_info")
+    if not isinstance(info, dict):
+        return payload
+    out = dict(info)
+    m = payload.get("mode")
+    if isinstance(m, dict):
+        v = next(iter(m.values()), None)
+        m = v if isinstance(v, str) else next(iter(m.keys()), None)
+    if m is not None:
+        out["mode"] = m
+    for k in ("ok","url","node_version","network","wallet"):
+        if k in payload:
+            out[k] = payload[k]
+    return out
+
+
 def current_lib_slot(node_api: str) -> int | None:
     try:
         with urllib.request.urlopen(f"{node_api}/cryptarchia/info", timeout=2) as response:
@@ -150,7 +167,7 @@ def current_lib_slot(node_api: str) -> int | None:
         return None
 
     try:
-        return int(payload.get("lib_slot"))
+        return int(_flatten_cryptarchia(payload).get("lib_slot"))
     except (TypeError, ValueError):
         return None
 
@@ -664,6 +681,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
             )
             return
 
+        payload = _flatten_cryptarchia(payload)
         payload["ok"] = True
         payload["url"] = url
         payload["node_version"] = self.node_version
