@@ -59,6 +59,11 @@ PROPOSAL_RE = re.compile(
 PROPOSAL_APPLIED_RE = re.compile(
     r"Successfully applied our own proposed block\. Publishing it to the blend network: HeaderId\(([0-9a-f]+)\)"
 )
+# v0.2 chain-leader wording (no parent/slot, no "with id"/"containing"):
+#   "proposed block HeaderId(<id>) with <n> transactions (<m> removed)"
+PROPOSAL_RE_V02 = re.compile(
+    r"proposed block HeaderId\(([0-9a-f]+)\) with (\d+) transactions \((\d+) removed\)"
+)
 NODE_VERSION_RE = re.compile(r"^logos-blockchain-node\s+([^\s]+)$", re.MULTILINE)
 
 
@@ -215,10 +220,35 @@ def parse_log_metadata(log_file: Path) -> tuple[dict[str, dict], dict[str, dict[
 
 
 def _ingest_proposal_line(proposals: dict[str, dict], raw_line: str) -> None:
-    if "proposed block with id" not in raw_line and "Successfully applied our own proposed block" not in raw_line:
+    if "proposed block" not in raw_line and "Successfully applied our own proposed block" not in raw_line:
         return
 
     line = ANSI_RE.sub("", raw_line)
+    if proposal_match := PROPOSAL_RE_V02.search(line):
+        block_id, tx_count, removed_count = proposal_match.groups()
+        proposal = proposals.setdefault(
+            block_id,
+            {
+                "timestamp": parse_log_timestamp(line),
+                "slot": None,
+                "parent_block_id": "",
+                "block_id": block_id,
+                "tx_count": int(tx_count),
+                "removed_count": int(removed_count),
+                "applied_locally": False,
+                "published_to_network": False,
+                "status": "proposed",
+            },
+        )
+        proposal.update(
+            {
+                "timestamp": proposal.get("timestamp") or parse_log_timestamp(line),
+                "tx_count": int(tx_count),
+                "removed_count": int(removed_count),
+            }
+        )
+        return
+
     if proposal_match := PROPOSAL_RE.search(line):
         parent_block_id, slot, block_id, tx_count, removed_count = proposal_match.groups()
         proposal = proposals.setdefault(
@@ -311,7 +341,7 @@ def journald_proposal_lines(unit: str, since: str = PROPOSAL_JOURNAL_SINCE) -> l
             [
                 "journalctl", "--user", "-u", unit,
                 "-p", "info", "--since", since, "--no-pager",
-                "--grep", "proposed block with id|Successfully applied our own proposed block",
+                "--grep", "proposed block HeaderId|proposed block with id|Successfully applied our own proposed block",
             ],
             check=True,
             capture_output=True,
