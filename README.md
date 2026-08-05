@@ -8,11 +8,12 @@ Local runbook and dashboard helpers for running a Logos Blockchain testnet node.
 
 The reusable dashboard lives in [`dashboard/`](dashboard/README.md).
 
-Current dashboard highlights:
+Current dashboard highlights (v0.1.3):
 
-- compatible with `logos-blockchain-node 0.1.2`
-- node mode, chain progress, wallet balance, and peer count
-- block proposal panel with recent proposal activity
+- compatible with **testnet v0.2 / v0.2.1** — reads node liveness from `cryptarchia_info.state` (0.2.1 moved it off the top-level `mode`), with a fallback for older 0.2.0 nodes
+- node state, chain progress, wallet balance, and peer count
+- block proposal panel — reads proposals from journald when no file logs exist
+- self-heals a dirty-shutdown crash loop; a slow/timing-out node can't wedge the dashboard
 - zone-board messages, live TUI sync, and local inscribing controls
 
 Start it from this directory:

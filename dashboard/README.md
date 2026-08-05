@@ -4,11 +4,11 @@ Small local dashboard for a Logos Blockchain node and `zone-board`.
 
 Compatible with:
 
-- `logos-blockchain-node 0.1.2`
+- Logos testnet **v0.2 / v0.2.1** (reads liveness from `cryptarchia_info.state`, with a fallback for 0.2.0)
 
 It shows:
 
-- node mode, height, tip, LIB, slot, and LIB slot from `/cryptarchia/info`
+- node state, height, tip, LIB, slot, and LIB slot from `/cryptarchia/info`
 - wallet balance from `/wallet/<public_key>/balance`
 - peer count from `/network/info`
 - recent block proposal activity from recent node logs
