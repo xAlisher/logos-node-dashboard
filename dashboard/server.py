@@ -156,6 +156,11 @@ def _flatten_cryptarchia(payload):
     if isinstance(m, dict):
         v = next(iter(m.values()), None)
         m = v if isinstance(v, str) else next(iter(m.keys()), None)
+    # 0.2.1: liveness moved from a top-level `mode` to `cryptarchia_info.state`
+    # (e.g. "Online"/"Bootstrapping"). Fall back to it so consumers that read
+    # `mode` (the /api/status payload, the top-bar indicator) keep working.
+    if m is None:
+        m = info.get("state")
     if m is not None:
         out["mode"] = m
     for k in ("ok","url","node_version","network","wallet"):
