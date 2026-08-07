@@ -20,7 +20,8 @@ git -C "$REPO" worktree prune
 git -C "$REPO" worktree add -q "$WORK" gh-pages
 cp /tmp/chain.json "$WORK/chain.json"
 cp "$DIR/chain.html" "$WORK/chain.html"
-git -C "$WORK" add chain.json chain.html
+echo "snapshot.logos.live" > "$WORK/CNAME"      # keep the custom domain across deploys
+git -C "$WORK" add chain.json chain.html CNAME
 git -C "$WORK" commit -q -m "snapshot: chain state $(date -u +%FT%TZ)" || echo "  (no change)"
 git -C "$WORK" push -q origin gh-pages
 git -C "$REPO" worktree remove --force "$WORK" 2>/dev/null || true
