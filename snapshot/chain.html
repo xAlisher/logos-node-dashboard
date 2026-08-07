@@ -14,10 +14,9 @@
   .pill{display:inline-block;padding:3px 12px;border-radius:999px;font-weight:600;font-size:13px}
   .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:14px;margin-top:18px}
   .tile .k{color:var(--mut);font-size:12px} .tile .v{font-size:22px;font-weight:650;font-variant-numeric:tabular-nums}
-  .hashrow{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:12px;font-size:12.5px}
-  .hashrow .k{color:var(--mut);flex:none}
-  .hashrow .val{display:flex;align-items:center;gap:8px;min-width:0}
-  .hashrow .v{font-family:ui-monospace,monospace;overflow-wrap:anywhere;text-align:right}
+  .hashrow{display:flex;align-items:flex-start;gap:8px;margin-top:12px;font-size:12.5px}
+  .hashrow .k{color:var(--mut);flex:none;font-weight:600;padding-top:5px}
+  .hashrow .v{font-family:ui-monospace,monospace;word-break:break-all;flex:1;min-width:0;padding-top:5px}
   .copy{display:inline-flex;align-items:center;justify-content:center;flex:none;width:26px;height:26px;padding:0;
     border:1px solid var(--bd);border-radius:7px;background:transparent;color:var(--mut);cursor:pointer;transition:.12s}
   .copy:hover{color:var(--tx);border-color:var(--mut)}
@@ -43,9 +42,8 @@ function color(s){ return s==='Online'?'var(--grn)': s==='Bootstrapping'?'var(--
 function short(h){ return h && h.length>16 ? h.slice(0,10)+'…'+h.slice(-6) : (h||'—'); }
 function hashRow(label, full){
   if(!full) return `<div class="hashrow"><span class="k">${label}</span><span class="v">—</span></div>`;
-  return `<div class="hashrow"><span class="k">${label}</span>
-    <span class="val"><span class="v">${short(full)}</span>
-    <button class="copy" title="Copy full ${label} hash" data-copy="${esc(full)}">${ICON_COPY}</button></span></div>`;
+  return `<div class="hashrow"><span class="k">${label}</span><span class="v">${full}</span>`+
+    `<button class="copy" title="Copy ${label} hash" data-copy="${esc(full)}">${ICON_COPY}</button></div>`;
 }
 async function copyHandler(e){
   const btn = e.target.closest('.copy'); if(!btn) return;
