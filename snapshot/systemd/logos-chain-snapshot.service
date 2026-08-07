@@ -1,0 +1,13 @@
+[Unit]
+Description=Publish sanitized Logos chain snapshot to gh-pages (ui#13)
+Documentation=https://github.com/xAlisher/logos-node-dashboard/tree/main/snapshot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Generate -> HARD security gate -> push to gh-pages. Feeds from the local node.
+# deploy.sh aborts (exit 1) if the security test finds any leak; a node-down just
+# publishes a reachable:false snapshot (still passes the gate).
+ExecStart=/usr/bin/bash %h/logos-node-dashboard/snapshot/deploy.sh http://127.0.0.1:8080
+TimeoutStartSec=120

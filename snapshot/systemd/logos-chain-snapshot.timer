@@ -1,0 +1,11 @@
+[Unit]
+Description=Publish Logos chain snapshot every 5 min (ui#13)
+
+[Timer]
+# Survives reboots (Persistent catches up a missed run); starts shortly after boot.
+OnBootSec=90s
+OnUnitActiveSec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
