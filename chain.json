@@ -1,0 +1,17 @@
+{
+  "network": "testnet",
+  "node_version": "0.2.1",
+  "state": "Online",
+  "height": 4229,
+  "slot": 145537,
+  "tip": "932b59844d9b5f475e3da9de5312b5359aa2c3811ec909106052b15efc96ab3b",
+  "lib": "6fe948348107e56ca474f013f65433210c11c604cdf72e323e9d2d0a44a297a9",
+  "lib_slot": 141997,
+  "genesis_unix_ms": 1785920400000,
+  "epoch": 4,
+  "current_slot": 145557,
+  "n_peers": 18,
+  "n_connections": 18,
+  "updated_utc": "2026-08-07T01:25:57Z",
+  "reachable": true
+}
