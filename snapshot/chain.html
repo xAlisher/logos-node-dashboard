@@ -32,6 +32,7 @@
   <div class="sub">A read-only, sanitized view of where the chain is. Chain state only — no wallet, keys, IPs, or peer identities.</div>
   <div class="card" id="card"><div class="sub">Loading…</div></div>
   <div class="foot">Auto-refreshes every 30s · source: <a href="chain.json">chain.json</a> · community insight, published from a community node.</div>
+  <div class="foot" id="fastsync"></div>
 </div>
 <script>
 const ICON_COPY  = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>';
@@ -78,7 +79,17 @@ async function load(){
     document.getElementById('card').replaceChildren($(`<div class="sub">Snapshot unavailable right now.</div>`));
   }
 }
+async function loadChaindata(){
+  try{
+    const c = await (await fetch('chaindata-latest.json?t='+Date.now())).json();
+    const mb = (c.size_bytes/1048576).toFixed(1);
+    document.getElementById('fastsync').innerHTML =
+      `⚡ Fast sync: <a href="${c.url}">download chaindata snapshot</a> · height ${c.height} · ${mb} MB · updated ${c.updated_utc}. `+
+      `Restore into <code>&lt;node&gt;/state/</code>, then start the node (it catches up the tip).`;
+  }catch(e){ document.getElementById('fastsync').textContent = ''; }
+}
 load(); setInterval(load, 30000);
+loadChaindata(); setInterval(loadChaindata, 300000);
 </script>
 </body>
 </html>
