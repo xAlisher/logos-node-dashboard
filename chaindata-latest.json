@@ -1,0 +1,8 @@
+{
+  "height": 4298,
+  "updated_utc": "2026-08-07T01:55:40Z",
+  "size_bytes": 4261737,
+  "sha256": "55bf486b671e7d0ee4754fb12fbf34a3da56ab6be4f8637753b9810562caba6a",
+  "url": "https://github.com/xAlisher/logos-node-dashboard/releases/download/chaindata/chaindata-h4298.tar.zst",
+  "restore": "extract into <node>/state/ then start the node"
+}
