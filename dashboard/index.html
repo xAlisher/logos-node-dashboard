@@ -434,6 +434,10 @@
         <div class="label">Peers</div>
         <div id="peerCount" class="value">-</div>
       </div>
+      <div class="card">
+        <div class="label">Vouchers</div>
+        <div id="voucherCount" class="value">-</div>
+      </div>
     </div>
 
     <div class="panel">
@@ -532,6 +536,7 @@
       mode: document.getElementById("mode"),
       height: document.getElementById("height"),
       slot: document.getElementById("slot"),
+      voucherCount: document.getElementById("voucherCount"),
       libSlot: document.getElementById("libSlot"),
       balance: document.getElementById("balance"),
       peerCount: document.getElementById("peerCount"),
@@ -592,6 +597,7 @@
         els.height.textContent = data.height ?? "-";
         els.slot.textContent = data.slot ?? "-";
         els.libSlot.textContent = data.lib_slot ?? "-";
+        els.voucherCount.textContent = data.voucher_count ?? "-";
         if (data.wallet?.ok) {
           els.balance.textContent = `${data.wallet.balance ?? "-"} LGO`;
           els.balance.title = data.wallet.address || "";

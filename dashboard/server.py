@@ -722,7 +722,22 @@ class DashboardHandler(BaseHTTPRequestHandler):
         payload["node_version"] = self.node_version
         payload["network"] = self._network_info()
         payload["wallet"] = self._wallet_balance()
+        payload["voucher_count"] = self._voucher_count()
         self._send_json(payload)
+
+    def _voucher_count(self) -> int:
+        # Claimable leadership vouchers = blocks this node has led (rewards pending).
+        url = f"{self.node_api}/leader/claim/vouchers"
+        try:
+            with urllib.request.urlopen(url, timeout=2) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except (urllib.error.URLError, json.JSONDecodeError, TimeoutError, OSError):
+            return 0
+        if isinstance(payload, dict) and isinstance(payload.get("vouchers"), list):
+            return len(payload["vouchers"])
+        if isinstance(payload, list):
+            return len(payload)
+        return 0
 
     def _wallet_balance(self) -> dict:
         public_key = self.wallet_public_key.strip()
