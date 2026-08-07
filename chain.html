@@ -14,8 +14,14 @@
   .pill{display:inline-block;padding:3px 12px;border-radius:999px;font-weight:600;font-size:13px}
   .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:14px;margin-top:18px}
   .tile .k{color:var(--mut);font-size:12px} .tile .v{font-size:22px;font-weight:650;font-variant-numeric:tabular-nums}
-  .hashrow{display:flex;justify-content:space-between;gap:10px;margin-top:12px;font-size:12.5px}
-  .hashrow .k{color:var(--mut)} .hashrow .v{font-family:ui-monospace,monospace;overflow-wrap:anywhere;text-align:right}
+  .hashrow{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:12px;font-size:12.5px}
+  .hashrow .k{color:var(--mut);flex:none}
+  .hashrow .val{display:flex;align-items:center;gap:8px;min-width:0}
+  .hashrow .v{font-family:ui-monospace,monospace;overflow-wrap:anywhere;text-align:right}
+  .copy{display:inline-flex;align-items:center;justify-content:center;flex:none;width:26px;height:26px;padding:0;
+    border:1px solid var(--bd);border-radius:7px;background:transparent;color:var(--mut);cursor:pointer;transition:.12s}
+  .copy:hover{color:var(--tx);border-color:var(--mut)}
+  .copy.ok{color:var(--grn);border-color:var(--grn)}
   .foot{color:var(--mut);font-size:12px;margin-top:16px}
   a{color:inherit}
 </style>
@@ -28,27 +34,46 @@
   <div class="foot">Auto-refreshes every 30s · source: <a href="chain.json">chain.json</a> · community insight, published from a community node.</div>
 </div>
 <script>
+const ICON_COPY  = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>';
+const ICON_CHECK = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
 const $ = (h)=>{const d=document.createElement('div');d.innerHTML=h;return d.firstElementChild;};
+const esc = (s)=>String(s??'').replace(/"/g,'&quot;');
 function color(s){ return s==='Online'?'var(--grn)': s==='Bootstrapping'?'var(--amb)':'var(--red)'; }
 function short(h){ return h && h.length>16 ? h.slice(0,10)+'…'+h.slice(-6) : (h||'—'); }
+function hashRow(label, full){
+  if(!full) return `<div class="hashrow"><span class="k">${label}</span><span class="v">—</span></div>`;
+  return `<div class="hashrow"><span class="k">${label}</span>
+    <span class="val"><span class="v">${short(full)}</span>
+    <button class="copy" title="Copy full ${label} hash" data-copy="${esc(full)}">${ICON_COPY}</button></span></div>`;
+}
+async function copyHandler(e){
+  const btn = e.target.closest('.copy'); if(!btn) return;
+  const text = btn.getAttribute('data-copy');
+  try{ await navigator.clipboard.writeText(text); }
+  catch(_){ const t=document.createElement('textarea'); t.value=text; document.body.appendChild(t); t.select(); document.execCommand('copy'); t.remove(); }
+  btn.classList.add('ok'); btn.innerHTML = ICON_CHECK;
+  setTimeout(()=>{ btn.classList.remove('ok'); btn.innerHTML = ICON_COPY; }, 1300);
+}
 async function load(){
   try{
     const d = await (await fetch('chain.json?t='+Date.now())).json();
     const online = d.reachable !== false;
-    document.getElementById('card').replaceChildren($(`
+    const card = $(`
       <div>
         <span class="pill" style="background:${color(d.state)}22;color:${color(d.state)}">${online ? (d.state||'—') : 'Unreachable'}</span>
         <span style="color:var(--mut);font-size:13px;margin-left:10px">${d.network||''} ${d.node_version||''} · epoch ${d.epoch??'—'}</span>
         <div class="grid">
-          <div class="tile"><div class="k">Height</div><div class="v">${(d.height??'—').toLocaleString?.()||d.height}</div></div>
+          <div class="tile"><div class="k">Height</div><div class="v">${(typeof d.height==='number'?d.height.toLocaleString():d.height)??'—'}</div></div>
           <div class="tile"><div class="k">Slot</div><div class="v">${d.slot??'—'}</div></div>
           <div class="tile"><div class="k">LIB slot</div><div class="v">${d.lib_slot??'—'}</div></div>
           <div class="tile"><div class="k">Peers</div><div class="v">${d.n_peers??'—'}</div></div>
         </div>
-        <div class="hashrow"><span class="k">Tip</span><span class="v">${short(d.tip)}</span></div>
-        <div class="hashrow"><span class="k">LIB</span><span class="v">${short(d.lib)}</span></div>
+        ${hashRow('Tip', d.tip)}
+        ${hashRow('LIB', d.lib)}
         <div class="foot">Updated ${d.updated_utc||'—'}</div>
-      </div>`));
+      </div>`);
+    card.addEventListener('click', copyHandler);
+    document.getElementById('card').replaceChildren(card);
   }catch(e){
     document.getElementById('card').replaceChildren($(`<div class="sub">Snapshot unavailable right now.</div>`));
   }
