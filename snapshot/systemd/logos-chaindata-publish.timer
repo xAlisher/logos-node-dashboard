@@ -1,0 +1,10 @@
+[Unit]
+Description=Publish Logos chaindata tarball every 6h (ui#13)
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=6h
+Persistent=true
+
+[Install]
+WantedBy=timers.target

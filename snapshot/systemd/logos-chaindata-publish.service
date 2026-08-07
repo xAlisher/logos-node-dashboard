@@ -1,0 +1,13 @@
+[Unit]
+Description=Publish Logos chaindata fast-sync tarball to the GitHub 'chaindata' release (ui#13)
+Documentation=https://github.com/xAlisher/logos-node-dashboard/tree/main/snapshot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Requires gh authed (contents:write, e.g. GH_TOKEN) on this host for the release upload,
+# plus the repo push deploy key for the chaindata-latest.json gh-pages pointer.
+# Tars chain data only (state/db, never the sibling keystore) with a hard security gate.
+ExecStart=/usr/bin/bash %h/logos-node-dashboard/snapshot/chaindata-publish.sh
+TimeoutStartSec=600

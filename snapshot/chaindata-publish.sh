@@ -36,20 +36,23 @@ NOW=$(date -u +%FT%TZ)
 gh release upload chaindata "$TAR" --repo "$GHREPO" --clobber
 URL="https://github.com/$GHREPO/releases/download/chaindata/chaindata-h$H.tar.zst"
 
-# chaindata-latest.json -> gh-pages (deploy key)
-git -C "$REPO" fetch -q origin
-git -C "$REPO" worktree prune; rm -rf /tmp/cd-ghp
-git -C "$REPO" worktree add -q /tmp/cd-ghp gh-pages
-python3 - "$H" "$NOW" "$SZ" "$SHA" "$URL" > /tmp/cd-ghp/chaindata-latest.json <<'PY'
+# chaindata-latest.json -> gh-pages (deploy key), race-safe (the metadata job also pushes here)
+python3 - "$H" "$NOW" "$SZ" "$SHA" "$URL" > "$WORK/chaindata-latest.json" <<'PY'
 import json,sys
 h,now,sz,sha,url=sys.argv[1:6]
 print(json.dumps({"height":int(h),"updated_utc":now,"size_bytes":int(sz),
                   "sha256":sha,"url":url,"restore":"extract into <node>/state/ then start the node"},indent=2))
 PY
-git -C /tmp/cd-ghp add chaindata-latest.json
-git -C /tmp/cd-ghp commit -q -m "chaindata: h$H $NOW" || true
-git -C /tmp/cd-ghp push -q origin gh-pages
-git -C "$REPO" worktree remove --force /tmp/cd-ghp 2>/dev/null || true
+for attempt in 1 2 3 4 5; do
+  git -C "$REPO" fetch -q origin gh-pages
+  rm -rf /tmp/cd-ghp; git -C "$REPO" worktree prune
+  git -C "$REPO" worktree add -q --detach /tmp/cd-ghp origin/gh-pages
+  cp "$WORK/chaindata-latest.json" /tmp/cd-ghp/chaindata-latest.json
+  git -C /tmp/cd-ghp add chaindata-latest.json
+  git -C /tmp/cd-ghp commit -q -m "chaindata: h$H $NOW" || { git -C "$REPO" worktree remove --force /tmp/cd-ghp; break; }
+  if git -C /tmp/cd-ghp push -q origin HEAD:gh-pages 2>/dev/null; then git -C "$REPO" worktree remove --force /tmp/cd-ghp; break; fi
+  git -C "$REPO" worktree remove --force /tmp/cd-ghp 2>/dev/null || true; sleep 3
+done
 
 # ── prune: keep newest KEEP by height ──
 mapfile -t OLD < <(gh release view chaindata --repo "$GHREPO" --json assets \
