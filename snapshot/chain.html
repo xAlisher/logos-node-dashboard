@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Logos testnet — chain snapshot</title>
+<style>
+  :root { color-scheme: light dark; --bg:#0e0e11; --card:#1a1a20; --bd:#2a2a35; --tx:#ececf1; --mut:#9797a6; --grn:#37d39b; --amb:#e6b566; --red:#ff5c5c; }
+  @media (prefers-color-scheme: light){ :root{ --bg:#f6f6f9; --card:#fff; --bd:#e2e2ea; --tx:#1a1a22; --mut:#6b6b7a; } }
+  body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.5 ui-sans-serif,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:720px;margin:0 auto;padding:32px 20px}
+  h1{font-size:19px;font-weight:650;margin:0 0 4px} .sub{color:var(--mut);font-size:13px;margin-bottom:20px}
+  .card{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:20px}
+  .pill{display:inline-block;padding:3px 12px;border-radius:999px;font-weight:600;font-size:13px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:14px;margin-top:18px}
+  .tile .k{color:var(--mut);font-size:12px} .tile .v{font-size:22px;font-weight:650;font-variant-numeric:tabular-nums}
+  .hashrow{display:flex;justify-content:space-between;gap:10px;margin-top:12px;font-size:12.5px}
+  .hashrow .k{color:var(--mut)} .hashrow .v{font-family:ui-monospace,monospace;overflow-wrap:anywhere;text-align:right}
+  .foot{color:var(--mut);font-size:12px;margin-top:16px}
+  a{color:inherit}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Logos testnet — chain snapshot</h1>
+  <div class="sub">A read-only, sanitized view of where the chain is. Chain state only — no wallet, keys, IPs, or peer identities.</div>
+  <div class="card" id="card"><div class="sub">Loading…</div></div>
+  <div class="foot">Auto-refreshes every 30s · source: <a href="chain.json">chain.json</a> · community insight, published from a community node.</div>
+</div>
+<script>
+const $ = (h)=>{const d=document.createElement('div');d.innerHTML=h;return d.firstElementChild;};
+function color(s){ return s==='Online'?'var(--grn)': s==='Bootstrapping'?'var(--amb)':'var(--red)'; }
+function short(h){ return h && h.length>16 ? h.slice(0,10)+'…'+h.slice(-6) : (h||'—'); }
+async function load(){
+  try{
+    const d = await (await fetch('chain.json?t='+Date.now())).json();
+    const online = d.reachable !== false;
+    document.getElementById('card').replaceChildren($(`
+      <div>
+        <span class="pill" style="background:${color(d.state)}22;color:${color(d.state)}">${online ? (d.state||'—') : 'Unreachable'}</span>
+        <span style="color:var(--mut);font-size:13px;margin-left:10px">${d.network||''} ${d.node_version||''} · epoch ${d.epoch??'—'}</span>
+        <div class="grid">
+          <div class="tile"><div class="k">Height</div><div class="v">${(d.height??'—').toLocaleString?.()||d.height}</div></div>
+          <div class="tile"><div class="k">Slot</div><div class="v">${d.slot??'—'}</div></div>
+          <div class="tile"><div class="k">LIB slot</div><div class="v">${d.lib_slot??'—'}</div></div>
+          <div class="tile"><div class="k">Peers</div><div class="v">${d.n_peers??'—'}</div></div>
+        </div>
+        <div class="hashrow"><span class="k">Tip</span><span class="v">${short(d.tip)}</span></div>
+        <div class="hashrow"><span class="k">LIB</span><span class="v">${short(d.lib)}</span></div>
+        <div class="foot">Updated ${d.updated_utc||'—'}</div>
+      </div>`));
+  }catch(e){
+    document.getElementById('card').replaceChildren($(`<div class="sub">Snapshot unavailable right now.</div>`));
+  }
+}
+load(); setInterval(load, 30000);
+</script>
+</body>
+</html>
