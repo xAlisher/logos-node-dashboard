@@ -1,8 +1,8 @@
 {
-  "height": 7200,
-  "updated_utc": "2026-08-08T02:10:23Z",
-  "size_bytes": 8256801,
-  "sha256": "081a7d9f81cda60850afac330d79cb8035fcce2b9bf1d86cffa04f1c7d73e64a",
-  "url": "https://github.com/xAlisher/logos-node-dashboard/releases/download/chaindata/chaindata-h7200.tar.zst",
+  "height": 7835,
+  "updated_utc": "2026-08-08T08:10:23Z",
+  "size_bytes": 8815554,
+  "sha256": "5bcf4c5a00460fa58fa0f4eeff52ac0537c0fdfcebe95c33495fda4ff882a325",
+  "url": "https://github.com/xAlisher/logos-node-dashboard/releases/download/chaindata/chaindata-h7835.tar.zst",
   "restore": "extract into <node>/state/ then start the node"
 }
