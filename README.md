@@ -1,5 +1,8 @@
 # Logos Blockchain Runbook
 
+> This is a personal, experimental hobby project. It is not an official Logos product. Not audited.
+
+
 Local runbook and dashboard helpers for running a Logos Blockchain testnet node.
 <img width="1593" height="1308" alt="image" src="https://github.com/user-attachments/assets/ebe1790d-ff05-41b8-8bd4-8df83d759911" />
 
