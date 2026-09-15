@@ -723,7 +723,23 @@ class DashboardHandler(BaseHTTPRequestHandler):
         payload["network"] = self._network_info()
         payload["wallet"] = self._wallet_balance()
         payload["voucher_count"] = self._voucher_count()
+        payload["blend"] = self._blend_info()
         self._send_json(payload)
+
+    def _blend_info(self) -> dict:
+        # Blend mode: /blend/info core_info is null in Edge mode, populated (with the
+        # current-epoch core peer set) once the node is an active Blend Core provider.
+        url = f"{self.node_api}/blend/info"
+        try:
+            with urllib.request.urlopen(url, timeout=2) as response:
+                data = json.loads(response.read().decode("utf-8"))
+        except (urllib.error.URLError, json.JSONDecodeError, TimeoutError, OSError) as exc:
+            return {"mode": "-", "peers": 0, "error": str(exc)}
+        core = data.get("core_info") if isinstance(data, dict) else None
+        if core:
+            peers = core.get("current_epoch_peers") or []
+            return {"mode": "Core", "peers": len(peers)}
+        return {"mode": "Edge", "peers": 0}
 
     def _voucher_count(self) -> int:
         # Claimable leadership vouchers = blocks this node has led (rewards pending).

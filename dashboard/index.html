@@ -88,6 +88,7 @@
     .status-online { color: var(--good); }
     .status-bootstrapping { color: var(--warn); }
     .status-offline { color: var(--bad); }
+    .status-core { color: #d9a521; }
 
     .panel {
       padding: 18px;
@@ -438,6 +439,10 @@
         <div class="label">Vouchers</div>
         <div id="voucherCount" class="value">-</div>
       </div>
+      <div class="card">
+        <div class="label">Blend</div>
+        <div id="blendMode" class="value">-</div>
+      </div>
     </div>
 
     <div class="panel">
@@ -498,18 +503,6 @@
     </div>
 
     <div class="panel">
-      <h2>Zone Messages</h2>
-      <div class="meta" id="zoneMeta">Loading zone messages…</div>
-      <div id="zoneTabs" class="tabs" aria-label="Zone channels"></div>
-      <div id="zoneMessages" class="message-list">Loading…</div>
-      <form id="zoneComposer" class="composer">
-        <input id="zoneInput" maxlength="500" placeholder="Publish to alisher channel…" autocomplete="off">
-        <button id="zoneSend" type="submit">Send</button>
-      </form>
-      <div id="zoneSendStatus" class="send-status"></div>
-    </div>
-
-    <div class="panel">
       <h2>Recent Logs</h2>
       <div class="meta" id="logMeta">Loading logs…</div>
       <pre id="logs">Loading…</pre>
@@ -536,10 +529,11 @@
       mode: document.getElementById("mode"),
       height: document.getElementById("height"),
       slot: document.getElementById("slot"),
-      voucherCount: document.getElementById("voucherCount"),
+
       libSlot: document.getElementById("libSlot"),
       balance: document.getElementById("balance"),
       peerCount: document.getElementById("peerCount"),
+      voucherCount: document.getElementById("voucherCount"),
       tip: document.getElementById("tip"),
       lib: document.getElementById("lib"),
       apiUrl: document.getElementById("apiUrl"),
@@ -569,6 +563,7 @@
       logMeta: document.getElementById("logMeta"),
       logs: document.getElementById("logs"),
       subtitle: document.getElementById("subtitle"),
+      blendMode: document.getElementById("blendMode"),
     };
 
     let selectedZoneChannel = "all";
@@ -598,6 +593,13 @@
         els.slot.textContent = data.slot ?? "-";
         els.libSlot.textContent = data.lib_slot ?? "-";
         els.voucherCount.textContent = data.voucher_count ?? "-";
+        if (els.blendMode) {
+          const bm = (data.blend && data.blend.mode) ? data.blend.mode : "-";
+          els.blendMode.textContent = bm === "Core" && data.blend.peers ? `Core (${data.blend.peers})` : bm;
+          els.blendMode.className = "value";
+          if (bm === "Core") els.blendMode.classList.add("status-core");
+          els.blendMode.title = data.blend && data.blend.error ? data.blend.error : (bm === "Edge" ? "Not declared to the Blend Network" : "");
+        }
         if (data.wallet?.ok) {
           els.balance.textContent = `${data.wallet.balance ?? "-"} LGO`;
           els.balance.title = data.wallet.address || "";
@@ -983,6 +985,7 @@
     }
 
     async function loadZoneMessages() {
+      if (!els.zoneMessages) return;   // zone block removed
       try {
         const [cacheRes, liveRes] = await Promise.all([
           fetch("/api/zone-messages", { cache: "no-store" }),
@@ -1047,7 +1050,7 @@
       els.subscribeModal.classList.remove("open");
     }
 
-    els.zoneComposer.addEventListener("submit", async (event) => {
+    if (els.zoneComposer) els.zoneComposer.addEventListener("submit", async (event) => {
       event.preventDefault();
       const message = els.zoneInput.value.trim();
       if (!message) return;
