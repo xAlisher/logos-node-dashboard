@@ -9,9 +9,9 @@
   "lib_slot": 613792,
   "genesis_unix_ms": 1790758800000,
   "epoch": 18,
-  "current_slot": 661388,
-  "n_peers": 441,
+  "current_slot": 661748,
+  "n_peers": 440,
   "n_connections": 442,
-  "updated_utc": "2026-10-08T00:43:08Z",
+  "updated_utc": "2026-10-08T00:49:08Z",
   "reachable": true
 }
