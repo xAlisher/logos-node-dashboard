@@ -8,10 +8,10 @@
   "lib": "df2c1b290ace9294bf919c8d924f1dbd68f8223bfdd837f8ac031643b57c6a7c",
   "lib_slot": 2309589,
   "genesis_unix_ms": 1791556200000,
-  "epoch": 7,
-  "current_slot": 2399753,
-  "n_peers": 197,
-  "n_connections": 198,
-  "updated_utc": "2026-11-06T09:05:53Z",
+  "epoch": 8,
+  "current_slot": 2400113,
+  "n_peers": 194,
+  "n_connections": 195,
+  "updated_utc": "2026-11-06T09:11:53Z",
   "reachable": true
 }
