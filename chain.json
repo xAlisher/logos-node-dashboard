@@ -1,17 +1,17 @@
 {
   "network": null,
   "node_version": null,
-  "state": "Bootstrapping",
+  "state": "Online",
   "height": 106606,
   "slot": 3891604,
   "tip": "a460af2a5c4917da42c5968267c474f738d6746534d3017f5738304f258ec64e",
-  "lib": "df2c1b290ace9294bf919c8d924f1dbd68f8223bfdd837f8ac031643b57c6a7c",
-  "lib_slot": 2309589,
+  "lib": "480255e53862ff9682b4d7f95819c21d3ff5d8c35705c07d4eee46f8a6c33aaa",
+  "lib_slot": 3858138,
   "genesis_unix_ms": 1791556200000,
   "epoch": 12,
-  "current_slot": 3891616,
+  "current_slot": 3891917,
   "n_peers": 154,
   "n_connections": 159,
-  "updated_utc": "2026-11-23T15:30:16Z",
+  "updated_utc": "2026-11-23T15:35:17Z",
   "reachable": true
 }
