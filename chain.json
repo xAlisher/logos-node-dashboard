@@ -1,17 +1,17 @@
 {
   "network": null,
   "node_version": null,
-  "state": null,
-  "height": null,
-  "slot": null,
-  "tip": null,
-  "lib": null,
-  "lib_slot": null,
+  "state": "Online",
+  "height": 111227,
+  "slot": 4064267,
+  "tip": "d8cf4b0e2b640909d180add225b723c5c49a03fbd487e581190202ac08bb30bb",
+  "lib": "b2b25fce7070354c9170535a6937b6a0d0424cf8c7293dcd16c3963ae19e97e3",
+  "lib_slot": 4028436,
   "genesis_unix_ms": 1791556200000,
   "epoch": 13,
-  "current_slot": 4064063,
-  "n_peers": 125,
-  "n_connections": 135,
-  "updated_utc": "2026-11-25T15:24:23Z",
-  "reachable": false
+  "current_slot": 4064356,
+  "n_peers": 148,
+  "n_connections": 150,
+  "updated_utc": "2026-11-25T15:29:16Z",
+  "reachable": true
 }
